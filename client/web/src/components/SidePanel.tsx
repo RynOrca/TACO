@@ -13,11 +13,13 @@ export function SidePanel({
   askAgent,
   refreshTodos,
   autoSummary,
+  setIncludePrivate,
 }: {
   state: State;
   askAgent: (question: string, scope: 'private' | 'group') => void;
   refreshTodos: () => void;
   autoSummary: (action: 'status' | 'on' | 'off' | 'now', minutes?: number) => void;
+  setIncludePrivate: (value: boolean) => void;
 }) {
   const auto = state.autoSummary;
   const members = [...state.online];
@@ -77,6 +79,17 @@ export function SidePanel({
 
       <section>
         <h2>问 Agent</h2>
+        <label className="opt">
+          <input
+            type="checkbox"
+            checked={state.includePrivate}
+            onChange={(e) => setIncludePrivate(e.target.checked)}
+          />
+          <span>
+            总结时把我与 Agent 的私聊也算进去
+            <em>勾选后 Agent 能读 <code>agent:{state.me ?? '我'}</code>；群里总结的结果会发到群里</em>
+          </span>
+        </label>
         <div className="qa">
           {QUICK.map((item) => (
             <button

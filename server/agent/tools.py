@@ -35,7 +35,8 @@ def _format_rows(rows, room_id: Optional[int] = None, header: str = "") -> str:
     lines = [header] if header else []
     for m in rows:
         if isinstance(m, Message):
-            ts = m.timestamp.strftime("%m-%d %H:%M") if m.timestamp else "-"
+            # 库里存的是 UTC，喂给模型前换成服务器本地时间，否则跟系统时间差 8 小时
+            ts = m.timestamp.astimezone().strftime("%m-%d %H:%M") if m.timestamp else "-"
             lines.append(f"[{ts}] {m.sender}: {_truncate(m.content)}")
         else:  # 兼容旧的 (sender, content, time) 返回
             lines.append(f"[{m[2]}] {m[0]}: {_truncate(m[1])}")
@@ -57,7 +58,7 @@ def get_current_time() -> str:
 
 
 def _require_group_room(room_id: int) -> Optional[str]:
-    """护栏：Agent 只允许碰群聊房间。私聊房间一律拒绝，报错写回给模型。"""
+    """护栏：总结/待办只能写进群聊房间（私聊房间里的内容不该被写成全群可见的待办）。"""
     try:
         is_group = chat_history.is_group_room(room_id)
     except (TypeError, ValueError):
@@ -98,18 +99,16 @@ def tavily_search(query: str, max_results: int = 5, max_content_length: int = 30
     return "\n".join(lines)[:MAX_OUTPUT_CHARS]
 
 
-def read_recent_chat_history(room_id: int, limit: int = 20) -> str:
-    """读取指定聊天室最近的消息，按时间正序返回。"""
-    denied = _require_group_room(room_id)
-    if denied:
-        return denied
+def read_recent_chat_history(room_id: int, limit: int = 20, label: str = "") -> str:
+    """读取指定会话最近的消息，按时间正序返回。房间号由服务端注入，模型只能选 scope。"""
     limit = _clamp(limit)
+    where = label or f"聊天室 {room_id}"
     rows = chat_history.get_recent_history(room_id, limit)
     if not rows:
-        return f"聊天室 {room_id} 暂无聊天记录。"
+        return f"{where} 暂无聊天记录。"
 
     rows = list(rows)[::-1]          # DAO 是倒序取的，这里反转成正序
-    header = f"聊天室 {room_id} 最近 {len(rows)} 条记录（时间正序）："
+    header = f"{where}最近 {len(rows)} 条记录（时间正序）："
     return _format_rows(rows, header=header)
 
 
@@ -129,7 +128,8 @@ def save_history_and_todo(room_id: int, content: str, kind: str) -> str:
     return _err(f"kind 只能是 summary 或 todo，收到的是 {kind!r}。")
 
 
-def search_chat_history(room_id: int, keywords: List[str], limit: int = 20) -> str:
+def search_chat_history(room_id: int, keywords: List[str], limit: int = 20,
+                        label: str = "") -> str:
     """按关键词检索历史消息（多关键词 OR 匹配）。"""
     if isinstance(keywords, str):
         keywords = [keywords]
@@ -137,16 +137,14 @@ def search_chat_history(room_id: int, keywords: List[str], limit: int = 20) -> s
     if not keywords:
         return _err("未提供有效关键词。可先调用 read_recent_chat_history 了解上下文。")
 
-    denied = _require_group_room(room_id)
-    if denied:
-        return denied
     limit = _clamp(limit)
+    where = label or f"聊天室 {room_id}"
     print(f"[Tool] 搜索历史消息：room={room_id}，关键词={keywords}")
     rows = chat_history.search_history(room_id, keywords, limit)
     if not rows:
-        return f"聊天室 {room_id}，关键词 {keywords}：无搜索结果"
+        return f"{where}，关键词 {keywords}：无搜索结果"
 
-    header = f"关键词 {keywords} 命中 {len(rows)} 条："
+    header = f"{where}关键词 {keywords} 命中 {len(rows)} 条："
     return _format_rows(rows, header=header)
 
 
@@ -274,13 +272,43 @@ _ROOM_BOUND = {
 }
 
 
-def build_room_tools(room_id: int, user_id: str = None) -> Tuple[List[dict], Dict[str, Callable]]:
+def build_room_tools(group_room_id: int, user_id: str = None,
+                     agent_room_id: Optional[int] = None
+                     ) -> Tuple[List[dict], Dict[str, Callable]]:
     """
-    为连接生成「已绑定 room_id」的工具规格与实现。
+    生成「已绑定房间」的工具规格与实现，模型只能选 scope 名字，房间号全在闭包里。
 
-    关键点：room_id 从 schema 中移除，模型看不到也填不了，只能通过闭包
-    拿到服务端注入的可信值，从根本上杜绝越权读取其他会话。
+    两段授权范围：
+      scope="group"          群聊房间（服务端注入的 group_room_id）
+      scope="agent_private"  发起人自己与 Agent 的私聊房间（只有本次请求明确授权时才绑进来）
+
+    别的两个人之间的私聊房间（pm:a:b）永远不在这个表里，模型填不出来、也猜不到。
     """
+    scopes: Dict[str, tuple[int, str]] = {
+        "group": (group_room_id, "群聊 main "),
+    }
+    if agent_room_id is not None:
+        scopes["agent_private"] = (agent_room_id, f"{user_id or '该用户'} 与 Agent 的私聊记录 ")
+
+    def resolve(scope: str) -> Tuple[Optional[int], Optional[str], Optional[str]]:
+        hit = scopes.get(scope)
+        if hit is not None:
+            return hit[0], hit[1], None
+        if scope == "agent_private" and agent_room_id is None:
+            return None, None, _err(
+                "本次任务没有读取私聊记录的授权，只能读群聊（scope=\"group\"）。"
+                "如果用户确实想让你一并看私聊，请让他重新发起并勾选包含私聊。"
+            )
+        return None, None, _err(f"scope 只能是 {sorted(scopes)}，收到的是 {scope!r}。")
+
+    def read_recent(limit: int = 20, scope: str = "group") -> str:
+        room, label, bad = resolve(scope)
+        return bad if bad else read_recent_chat_history(room, limit, label)
+
+    def search(keywords: List[str], limit: int = 20, scope: str = "group") -> str:
+        room, label, bad = resolve(scope)
+        return bad if bad else search_chat_history(room, keywords, limit, label)
+
     spec: List[dict] = []
     for tool in TOOLS_SPEC:
         name = tool["function"]["name"]
@@ -292,12 +320,24 @@ def build_room_tools(room_id: int, user_id: str = None) -> Tuple[List[dict], Dic
         required = params.get("required", [])
         if "room_id" in required:
             required.remove("room_id")
+
+        # 允许读私聊时，才把 scope 参数交给模型选；不允许时它连这个字段都看不到
+        if name in ("read_recent_chat_history", "search_chat_history") and agent_room_id is not None:
+            params["properties"]["scope"] = {
+                "type": "string",
+                "enum": ["group", "agent_private"],
+                "default": "group",
+                "description": (
+                    "读哪一份记录：group=群聊（默认）；"
+                    "agent_private=发起人自己与 Agent 的历史私聊（仅在本次任务被授权时可用）"
+                ),
+            }
         spec.append(tool)
 
     tools_map: Dict[str, Callable] = {
-        "read_recent_chat_history": lambda limit=20: read_recent_chat_history(room_id, limit),
-        "save_history_and_todo": lambda content, kind: save_history_and_todo(room_id, content, kind),
-        "search_chat_history": lambda keywords, limit=20: search_chat_history(room_id, keywords, limit),
+        "read_recent_chat_history": read_recent,
+        "save_history_and_todo": lambda content, kind: save_history_and_todo(group_room_id, content, kind),
+        "search_chat_history": search,
         "tavily_search": tavily_search,                # 联网能力保留
         "get_current_time": get_current_time,          # 与房间无关
     }

@@ -1072,6 +1072,34 @@ textarea {
   font: 400 10px/1.4 var(--mono);
 }
 
+.opt {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.opt input {
+  margin: 2px 0 0;
+  accent-color: var(--ink);
+}
+
+.opt em {
+  display: block;
+  margin-top: 2px;
+  color: var(--faint);
+  font: 400 9.5px/1.5 var(--mono);
+  font-style: normal;
+}
+
+.opt code {
+  font-family: var(--mono);
+}
+
 .qa {
   display: grid;
   gap: 6px;

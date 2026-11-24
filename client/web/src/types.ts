@@ -30,6 +30,10 @@ export interface ServerMsg {
   steps?: ToolStep[];
   scheduled?: boolean;
   scope?: 'private' | 'group';
+  /** 'main' | 'agent'：这条 Agent 消息该落在哪个会话里 */
+  thread?: string;
+  /** history 消息专用：读的是不是我与 Agent 的私聊 */
+  agent?: boolean;
   /* 定时总结状态 */
   enabled?: boolean;
   seconds?: number;
@@ -56,13 +60,13 @@ export type SendMsg =
   | { type: 'login' | 'register'; user_id: string; password: string }
   | { type: 'group'; msg: string; image?: string }
   | { type: 'private'; target: string; msg: string; image?: string }
-  | { type: 'agent'; msg: string; scope: 'private' | 'group' }
-  | { type: 'history'; limit?: number; before_id?: number; target?: string }
+  | { type: 'agent'; msg: string; scope: 'private' | 'group'; include_private?: boolean }
+  | { type: 'history'; limit?: number; before_id?: number; target?: string; agent?: boolean }
   | { type: 'todos' }
   | { type: 'autosummary'; action: 'status' | 'on' | 'off' | 'now'; minutes?: number }
   | { type: 'reconnect' };
 
-export type EventKind = 'group' | 'private' | 'agent' | 'system' | 'error';
+export type EventKind = 'group' | 'private' | 'agent' | 'ask' | 'system' | 'error';
 
 /** 一条渲染单元：聊天记录、系统提示或错误提示 */
 export interface ChatEvent {
@@ -97,6 +101,8 @@ export interface ThreadState {
 }
 
 export const MAIN = 'main';
+/** 我和 Agent 的私聊会话 */
+export const AGENT = 'agent';
 
 export const pmThread = (user: string) => `pm:${user}`;
 

@@ -31,19 +31,21 @@ function StepRow({ step, index }: { step: ToolStep; index: number }) {
 function AgentCard({ event }: { event: ChatEvent }) {
   const pending = event.status === 'pending';
   const steps = event.steps ?? [];
+  const known = event.steps !== undefined;
+  const title = pending
+    ? event.text
+    : event.scheduled
+      ? '定时自动总结 · 服务端调度'
+      : !known
+        ? '历史记录 · 工具调用细节未保存'
+        : steps.length
+          ? `真实工具调用 ${steps.length} 次`
+          : '未调用工具，直接回答';
   return (
     <div className={`agent${pending ? ' pending' : ''}`}>
       <div className="agent-top">
         <span className="badge">AGENT</span>
-        <span className="agent-ttl">
-          {pending
-            ? event.text
-            : event.scheduled
-              ? '定时自动总结 · 服务端调度'
-              : steps.length
-                ? `真实工具调用 ${steps.length} 次`
-                : '未调用工具，直接回答'}
-        </span>
+        <span className="agent-ttl">{title}</span>
       </div>
       {pending && (
         <div className="sk">

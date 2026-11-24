@@ -1,4 +1,4 @@
-import { MAIN, pmThread, threadUser } from './types';
+import { AGENT, MAIN, pmThread, threadUser } from './types';
 import type {
   ChatEvent,
   HistoryItem,
@@ -26,6 +26,8 @@ export interface State {
   imageBase: string;
   /** Agent 定时总结 */
   autoSummary: { enabled: boolean; seconds: number };
+  /** 让 Agent 总结时是否允许它读"我和 Agent 的私聊" */
+  includePrivate: boolean;
   /** 有更早的历史被插到前面，Transcript 要保住滚动位置 */
   prependToken: number;
   /** 需要滚到底部 */
@@ -46,7 +48,7 @@ export type Action =
   | { type: 'history-failed'; thread: string }
   | { type: 'agent-request'; thread: string; scope: 'private' | 'group' }
   | { type: 'hello'; imageBase: string }
-  | { type: 'agent-ask'; thread: string; text: string; scope: 'private' | 'group' }
+  | { type: 'include-private'; value: boolean }
   | { type: 'local'; kind: 'system' | 'error'; text: string };
 
 const emptyThread = (): ThreadState => ({
@@ -126,11 +128,15 @@ function eventFromHistory(item: HistoryItem): ChatEvent {
     event.image = item.content;
     event.text = '[图片]';
   }
+  if (item.msg_type === 'agent_ask_group' || item.msg_type === 'agent_ask_private') {
+    event.kind = 'ask';
+    event.agentScope = item.msg_type === 'agent_ask_group' ? 'group' : 'private';
+  }
   return event;
 }
 
 function mergeHistory(state: State, msg: ServerMsg, older: boolean): State {
-  const key = msg.target ? pmThread(msg.target) : MAIN;
+  const key = msg.agent ? AGENT : msg.target ? pmThread(msg.target) : MAIN;
   const items = (msg.items ?? []) as HistoryItem[];
   const incoming = items.map(eventFromHistory);
   const thread = state.threads[key] ?? emptyThread();
@@ -156,7 +162,8 @@ function applyExtras(event: ChatEvent, msg: ServerMsg): void {
     event.image = msg.image;
     event.text = '[图片]';
   }
-  if (msg.steps?.length) event.steps = msg.steps as ToolStep[];
+  // 服务端每轮都会带 steps；历史消息没有这个字段，界面要能区分"没调工具"和"不知道调没调"
+  if (msg.steps) event.steps = msg.steps as ToolStep[];
 }
 
 function dropPending(threads: Record<string, ThreadState>): Record<string, ThreadState> {
@@ -195,9 +202,18 @@ function onServer(state: State, msg: ServerMsg): State {
     }
 
     case 'group': {
-      const event = makeEvent('group', msg.sender || '?', msg.msg ?? '', msg.id);
+      const ask = msg.msg_type === 'agent_ask_group';
+      const event = makeEvent(ask ? 'ask' : 'group', msg.sender || '?', msg.msg ?? '', msg.id);
+      if (ask) event.agentScope = 'group';
       applyExtras(event, msg);
       return appendEvent(state, MAIN, event, state.active === MAIN);
+    }
+
+    case 'agent_ask': {
+      // 只有本人收得到：问 Agent 的私聊提问
+      const event = makeEvent('ask', msg.sender || '?', msg.msg ?? '', msg.id);
+      event.agentScope = 'private';
+      return appendEvent(state, AGENT, event, state.active === AGENT);
     }
 
     case 'private': {
@@ -212,17 +228,18 @@ function onServer(state: State, msg: ServerMsg): State {
 
     case 'agent': {
       if (msg.status === 'pending') {
-        const key = state.pendingAgent?.thread ?? state.active;
+        const key = msg.thread ?? state.pendingAgent?.thread ?? state.active;
         const event = makeEvent('agent', 'Agent', msg.msg ?? '正在思考…');
         event.status = 'pending';
-        event.scope = state.pendingAgent?.scope ?? 'private';
+        event.scope = msg.scope ?? state.pendingAgent?.scope ?? 'private';
         return appendEvent(state, key, event, state.active === key);
       }
-      const request = state.pendingAgent;
-      const target = request && request.scope === 'private' ? request.thread : MAIN;
+      const target = msg.thread === 'agent' ? AGENT
+        : msg.thread === 'main' ? MAIN
+        : state.pendingAgent?.scope === 'private' ? state.pendingAgent.thread : MAIN;
       const event = makeEvent('agent', 'Agent', msg.msg ?? '');
       event.status = 'done';
-      event.scope = msg.scope ?? request?.scope;
+      event.scope = msg.scope ?? state.pendingAgent?.scope;
       event.steps = msg.steps ?? [];
       event.scheduled = msg.scheduled;
       const stripped: State = {
@@ -355,13 +372,8 @@ export function reducer(state: State, action: Action): State {
       return appendEvent(state, state.active, event, true);
     }
 
-    case 'agent-ask': {
-      // 提问在本地回显成一条自己的消息（服务端不保存 Agent 提问，私聊提问更不能进群聊历史）
-      const kind = action.thread === MAIN ? 'group' : 'private';
-      const event = makeEvent(kind, state.me ?? '我', action.text);
-      event.agentScope = action.scope;
-      return appendEvent(state, action.thread, event, state.active === action.thread);
-    }
+    case 'include-private':
+      return { ...state, includePrivate: action.value };
 
     case 'agent-request':
       return {
@@ -389,6 +401,7 @@ export function initialState(): State {
     pendingAgent: null,
     imageBase: '',
     autoSummary: { enabled: false, seconds: 0 },
+    includePrivate: false,
     prependToken: 0,
     bottomToken: 0,
     todosDirty: 0,

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { Bridge } from './bridge-client';
 import { initialState, reducer } from './store';
 import type { State } from './store';
-import { MAIN, PAGE_SIZE, threadUser } from './types';
+import { AGENT, MAIN, PAGE_SIZE, threadUser } from './types';
 import type { SendMsg } from './types';
 import { uploadImage } from './upload';
 
@@ -16,6 +16,7 @@ export interface Chat {
   askAgent: (question: string, scope: 'private' | 'group') => void;
   sendImage: (file: File) => Promise<void>;
   autoSummary: (action: 'status' | 'on' | 'off' | 'now', minutes?: number) => void;
+  setIncludePrivate: (value: boolean) => void;
   submitAuth: (kind: 'login' | 'register', user: string, password: string) => void;
   setAuthUser: (user: string) => void;
   openAuth: (open: boolean) => void;
@@ -49,7 +50,8 @@ export function useChat(): Chat {
     (thread: string, older: boolean) => {
       const current = latest.current.threads[thread];
       const payload: SendMsg = { type: 'history', limit: PAGE_SIZE };
-      if (thread.startsWith('pm:')) payload.target = threadUser(thread);
+      if (thread === AGENT) payload.agent = true;
+      else if (thread.startsWith('pm:')) payload.target = threadUser(thread);
       if (older) {
         const ids = (current?.events ?? [])
           .map((e) => e.id)
@@ -88,12 +90,15 @@ export function useChat(): Chat {
         dispatch({ type: 'auth-open', open: true });
         return;
       }
-      const thread = scope === 'group' ? MAIN : active;
-      dispatch({ type: 'agent-ask', thread, text, scope });
+      // 群里问 → 答案回群里；私下问 → 进"我和 Agent"的会话
+      const thread = scope === 'group' ? MAIN : AGENT;
+      if (thread === AGENT) openThread(AGENT);   // 顺带把之前的私聊历史拉出来
       dispatch({ type: 'agent-request', thread, scope });
-      if (!send({ type: 'agent', msg: text, scope })) {
+      const includePrivate = latest.current.includePrivate;
+      if (!send({ type: 'agent', msg: text, scope, include_private: includePrivate })) {
         dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，Agent 请求没有发出去' });
       }
+      void active;
     },
     [send],
   );
@@ -178,6 +183,9 @@ export function useChat(): Chat {
       }
       if (active === MAIN) {
         send({ type: 'group', msg: text });
+      } else if (active === AGENT) {
+        // 在"我和 Agent"的会话里打字，就是在问 Agent
+        askAgent(text, 'private');
       } else {
         send({ type: 'private', target: threadUser(active), msg: text });
       }
@@ -213,6 +221,11 @@ export function useChat(): Chat {
       send(minutes ? { type: 'autosummary', action, minutes } : { type: 'autosummary', action });
     },
     [send],
+  );
+
+  const setIncludePrivate = useCallback(
+    (value: boolean) => dispatch({ type: 'include-private', value }),
+    [],
   );
 
   const setAuthUser = useCallback((user: string) => dispatch({ type: 'auth-form', user }), []);
@@ -253,6 +266,7 @@ export function useChat(): Chat {
     askAgent,
     sendImage,
     autoSummary,
+    setIncludePrivate,
     submitAuth,
     setAuthUser,
     openAuth,

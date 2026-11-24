@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useChat } from './use-chat';
 import { threadOf } from './store';
-import { MAIN, threadUser } from './types';
+import { AGENT, MAIN, threadUser } from './types';
 import { Sidebar, ConvHead } from './components/Sidebar';
 import { Transcript } from './components/Transcript';
 import { Composer } from './components/Composer';
@@ -15,7 +15,8 @@ export default function App() {
   const [dialog, setDialog] = useState<'search' | null>(null);
   const thread = threadOf(state, state.active);
   const isPM = state.active !== MAIN;
-  const target = isPM ? `@${threadUser(state.active)}` : 'main';
+  const target =
+    state.active === AGENT ? 'Agent' : isPM ? `@${threadUser(state.active)}` : 'main';
 
   const search = (keyword: string) => {
     setDialog(null);
@@ -66,6 +67,7 @@ export default function App() {
         askAgent={chat.askAgent}
         refreshTodos={chat.refreshTodos}
         autoSummary={chat.autoSummary}
+        setIncludePrivate={chat.setIncludePrivate}
       />
 
       {state.auth.open && (

@@ -1,6 +1,6 @@
 import { pmUsersOf, previewOf, threadOf } from '../store';
 import type { State } from '../store';
-import { MAIN, pmThread, threadUser } from '../types';
+import { AGENT, MAIN, pmThread, threadUser } from '../types';
 
 const initials = (name: string) => (name || '?').trim().charAt(0).toUpperCase() || '?';
 
@@ -23,6 +23,8 @@ export function Sidebar({
 }) {
   const mainPreview = previewOf(state, MAIN);
   const mainUnread = threadOf(state, MAIN).unread;
+  const agentPreview = previewOf(state, AGENT);
+  const agentUnread = threadOf(state, AGENT).unread;
   const pmUsers = pmUsersOf(state);
 
   return (
@@ -65,6 +67,21 @@ export function Sidebar({
 
       <div className="sect">私聊</div>
       <div className="list list-scroll">
+        <button
+          type="button"
+          className={`item${state.active === AGENT ? ' on' : ''}`}
+          onClick={() => openThread(AGENT)}
+        >
+          <span className="ava ai">AI</span>
+          <span className="t">
+            <b>Agent</b>
+            <em>{agentPreview.text || '只回我的提问记录'}</em>
+          </span>
+          <span className="meta">
+            <span className="tm">{agentPreview.time}</span>
+            {agentUnread > 0 && <span className="pill">{agentUnread}</span>}
+          </span>
+        </button>
         {pmUsers.length === 0 && <p className="list-empty">暂时没有其他人在线</p>}
         {pmUsers.map((user) => {
           const key = pmThread(user);
@@ -121,14 +138,19 @@ export function ConvHead({
   onSearch: () => void;
   onSummary: () => void;
 }) {
-  const isPM = state.active !== MAIN;
-  const title = isPM ? `@${threadUser(state.active)}` : 'main';
-  const pair = isPM
-    ? `pm:${[state.me ?? '', threadUser(state.active)].sort().join(':')}`
-    : `room_id ${state.roomId ?? '-'}`;
-  const meta = isPM
-    ? `私聊 · ${pair}`
-    : `群聊 · ${pair} · ${state.online.length} 人在线`;
+  const isAgent = state.active === AGENT;
+  const isPM = !isAgent && state.active !== MAIN;
+  const title = isAgent ? 'Agent' : isPM ? `@${threadUser(state.active)}` : 'main';
+  const pair = isAgent
+    ? `agent:${state.me ?? '-'}`
+    : isPM
+      ? `pm:${[state.me ?? '', threadUser(state.active)].sort().join(':')}`
+      : `room_id ${state.roomId ?? '-'}`;
+  const meta = isAgent
+    ? `与 Agent 的私聊 · ${pair} · 只有你能看到`
+    : isPM
+      ? `私聊 · ${pair}`
+      : `群聊 · ${pair} · ${state.online.length} 人在线`;
   return (
     <header className="chead">
       <h1>{title}</h1>

@@ -42,8 +42,14 @@ class ChatService:
 
     # ---------------------------------------------------------------- 房间
     def group_room_id(self) -> int:
-        """Agent 的授权边界：永远只绑群聊主房间。"""
+        """群聊主房间。Agent 读群聊永远只绑这里。"""
         return chat_history.ensure_room("main")
+
+    @staticmethod
+    def agent_room_id(user_id: str) -> int:
+        """每个用户自己与 Agent 的私聊房间：只有本人能读写，别人（含别人的 Agent 任务）碰不到。"""
+        return chat_history.ensure_room(
+            f"agent:{user_id}", room_type="private", owner_id=user_id)
 
     # ---------------------------------------------------------------- 群聊/私聊
     @staticmethod
@@ -155,19 +161,60 @@ class ChatService:
         if scope not in ("private", "group"):
             return err("BAD_PARAM", "scope 只能是 private 或 group")
 
-        # 不论用户在哪提问，Agent 读的都是群聊房间；私聊内容不具备授权
-        room_id = self.group_room_id()
+        include_private = bool(msg.get("include_private"))
+        group_room = self.group_room_id()
+        agent_room = self.agent_room_id(ctx.user_id)
+
+        # 提问先作为一条真实消息落库：群里问就广播，私下问只进"我和 Agent"的房间
+        try:
+            if scope == "group":
+                question = text if text.lower().startswith("@agent") else f"@Agent {text}"
+                qid = chat_history.save_message(group_room, ctx.user_id, question, "agent_ask_group")
+                self.users.broadcast({
+                    "type": "group", "sender": ctx.user_id, "msg": question,
+                    "msg_type": "agent_ask_group", "agent_scope": "group", "id": qid,
+                })
+                thread, answer_room = "main", group_room
+            else:
+                qid = chat_history.save_message(agent_room, ctx.user_id, text, "agent_ask_private")
+                ctx.send({
+                    "type": "agent_ask", "sender": ctx.user_id, "msg": text,
+                    "scope": "private", "id": qid,
+                })
+                thread, answer_room = "agent", agent_room
+        except Exception as e:
+            return err("SAVE_FAILED", f"提问保存失败：{e}")
+
+        # 勾了"包含私聊"就把这层授权明确写进这一轮的提示词里，
+        # 否则模型只会按默认 scope=group 去读，勾选形同虚设
+        prompt = text
+        if include_private:
+            prompt = (
+                f"{text}\n\n"
+                "（本次任务已授权你读取该用户与你的私聊记录："
+                "请用 read_recent_chat_history(scope=\"agent_private\") 看一眼，"
+                "如果里面有结论或待办，合并进回答。）"
+            )
+
         ctx.send({
             "type": "agent", "sender": "Agent",
-            "msg": "正在思考，请稍候…", "status": "pending", "scope": scope,
+            "msg": "正在思考，请稍候…", "status": "pending",
+            "scope": scope, "thread": thread,
         })
-        self._agent_pool.submit(self._agent_task, ctx.user_id, ctx.conn, room_id, text, scope)
+        self._agent_pool.submit(
+            self._agent_task, ctx.user_id, ctx.conn, group_room,
+            agent_room if include_private else None,
+            prompt, scope, thread, answer_room,
+        )
         return None
 
-    def _agent_task(self, user_id: str, conn, room_id: int, text: str, scope: str):
+    def _agent_task(self, user_id: str, conn, group_room: int,
+                    agent_room: Optional[int], text: str, scope: str,
+                    thread: str, answer_room: int):
         try:
             reply, steps = agent_core.run_detailed(
-                text, max_steps=config.AGENT_MAX_STEPS, room_id=room_id, user_id=user_id,
+                text, max_steps=config.AGENT_MAX_STEPS, room_id=group_room,
+                user_id=user_id, agent_room_id=agent_room,
             )
         except Exception as e:
             print(f"[Agent] 调用异常: {e}")
@@ -175,18 +222,19 @@ class ChatService:
 
         payload = {
             "type": "agent", "sender": "Agent", "msg": reply,
-            "status": "done", "steps": steps, "scope": scope,
+            "status": "done", "steps": steps, "scope": scope, "thread": thread,
         }
-        if scope == "group":
-            try:
-                payload["id"] = chat_history.save_message(room_id, "Agent", reply, "agent")
-            except Exception as e:
-                print(f"[Agent] 回复落库失败: {e}")
-            log_chat("Agent", "Agent", reply, room_id, "main")
+        try:
+            payload["id"] = chat_history.save_message(answer_room, "Agent", reply, "agent")
+        except Exception as e:
+            print(f"[Agent] 回复落库失败: {e}")
+
+        if thread == "main":
+            log_chat("Agent", "Agent", reply, group_room, "main")
             self.users.broadcast(payload)
         else:
-            log_chat("Agent", "Agent", f"（只回 {user_id}）{reply}", room_id, "main")
-            # 私聊问答只回给提问者，不写进群聊历史：否则群里以后能翻到别人的私聊问答
+            log_chat("Agent", "Agent", f"（只回 {user_id}）{reply}", answer_room,
+                     f"agent:{user_id}")
             self.users.send_to(user_id, payload, conn=conn)
 
     # ---------------------------------------------------------------- 定时总结
@@ -264,12 +312,16 @@ class ChatService:
         if need:
             return need
 
-        target = (msg.get("target") or "").strip()
-        if target:
+        if msg.get("agent"):
+            room_id = self.agent_room_id(ctx.user_id)
+            target = ""
+        elif (msg.get("target") or "").strip():
+            target = msg["target"].strip()
             room_id = chat_history.room_id_by_name("pm:" + ":".join(sorted([ctx.user_id, target])))
             if room_id is None:
                 return {"type": "history", "target": target, "items": []}
         else:
+            target = ""
             room_id = ctx.room_id
 
         limit = msg.get("limit", 20)
@@ -290,6 +342,7 @@ class ChatService:
             for m in reversed(rows)
         ]
         return {"type": "history", "target": target or None, "items": items,
+                "agent": bool(msg.get("agent")),
                 "before_id": before_id, "more": len(rows) >= chat_history._clamp(limit)}
 
     def handle_todos(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
@@ -305,7 +358,7 @@ class ChatService:
         lines = []
         for m in reversed(rows):
             content = m.content if len(m.content) <= truncate else m.content[:truncate] + "…"
-            ts = m.timestamp.strftime("%m-%d %H:%M") if m.timestamp else "-"
+            ts = m.timestamp.astimezone().strftime("%m-%d %H:%M") if m.timestamp else "-"
             lines.append(f"[{ts}] {m.sender}: {content}")
         return "\n".join(lines)
 

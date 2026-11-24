@@ -11,7 +11,7 @@
 | 注册 / 登录 | `/register 用户名 密码`、`/login 用户名 密码`，密码以 PBKDF2-SHA256 加盐存储；同名重连会踢掉旧连接 |
 | 群聊 | 直接输入内容发送，服务端广播给所有在线用户 |
 | 私聊 | `/pm 目标用户 消息`，两人固定映射到一个 `pm:a:b` 房间，双向一致 |
-| AI Agent | 群里 `@Agent 问题` 直接公开回答，`/agent 问题` 只回给自己，`/agent@group 问题` 指定公开；右栏「问 Agent」有三个快捷入口。提问会像普通消息一样显示出来，名字后面跟一条灰色备注 `(Agent 只回我)` / `(Agent 群内公开)` |
+| AI Agent | 群里 `@Agent 问题` 公开回答，`/agent 问题` 只回给自己，`/agent@group 问题` 指定公开；右栏「问 Agent」有三个快捷入口。提问本身也会作为一条消息落库并显示（名字后面带灰色备注 `(Agent 只回我)` / `(Agent 群内公开)`） |
 | Agent 工具 | 读最近聊天记录、按关键词检索、保存总结/待办、**读取服务器当前时间**、Tavily 联网搜索；每次调用的名字/参数/耗时/结果预览随回复一起回传，界面上按「真实工具调用 N 次」逐条展开 |
 | Agent 定时总结 | 到点自动让 Agent 总结群聊并广播；`/auto 5` 开启（每 5 分钟）、`/auto off` 关闭、`/auto now` 立刻跑一次，右栏也有一组按钮 |
 | 表情 / 图片消息 | 表情是 Unicode 字符，跟着普通文本走；整条消息只有 1-3 个表情时放大显示。图片先压到最大边 1280，走服务端内置 HTTP 服务上传，聊天消息里只传一个 32 位十六进制文件名（也支持 Ctrl+V 粘贴截图） |
@@ -34,10 +34,18 @@
                     ┌──────────── main（群聊，广播给所有人） ────────────┐
 alice ──socket──►   │                                                    │
 bob   ──socket──►   │   pm:alice:bob（私聊，只单播给这两个人）           │
-carol ──socket──►   │                                                    │
+carol ──socket──►   │   agent:alice / agent:bob（各自与 Agent 的私聊）   │
                     └────────────────────────────────────────────────────┘
-Agent 只被授权读 main，pm:* 房间对它不可读（见「Agent 与工具层」）
+Agent 默认只被授权读 main；pm:* 永远读不到；agent:<本人> 只在本人明确授权时才读
 ```
+
+三个 `room_type='private'` 的房间长得很像，权限完全不同：
+
+| 房间 | 谁能读 | Agent 能不能读 |
+| --- | --- | --- |
+| `pm:alice:bob` | alice、bob | **永远不能**（不是工具能选的 scope） |
+| `agent:alice` | 只有 alice | 只有 alice 自己发起、并且勾了「包含私聊」时，才能用 `scope="agent_private"` 读 |
+| `main` | 所有人 | 默认就能读 |
 
 ## 项目架构
 
@@ -335,14 +343,15 @@ python -m client.socket_client
 | `login` | C→S | `user_id`, `password` | `UserService.handle_login` |
 | `group` | C→S | `msg`；图片消息改填 `image`（文件名） | `ChatService.handle_group` |
 | `private` | C→S | `target`, `msg`；图片消息改填 `image` | `ChatService.handle_private` |
-| `agent` | C→S | `msg`, `scope`(`private`/`group`) | `ChatService.handle_agent` |
+| `agent` | C→S | `msg`, `scope`(`private`/`group`), `include_private` | `ChatService.handle_agent`。`include_private=true` 表示本轮允许 Agent 读"我和 Agent 的私聊" |
 | `todos` | C→S | — | `ChatService.handle_todos` |
 | `autosummary` | C→S | `action`(`status`/`on`/`off`/`now`), `minutes` | `ChatService.handle_auto_summary` |
-| `history` | C→S | 可选 `target`、`limit`、`before_id` | `ChatService.handle_history`。不填 `target` 读当前群聊，填了读「我」与该用户的私聊房间（房间名由服务端按 `pm:me:target` 算，客户端无法指定 room_id）；带 `before_id` 时取更早的一页 |
+| `history` | C→S | 可选 `target`、`agent`、`limit`、`before_id` | `ChatService.handle_history`。不填 `target` 读当前群聊，填了读「我」与该用户的私聊房间（房间名由服务端按 `pm:me:target` 算，客户端无法指定 room_id）；带 `before_id` 时取更早的一页；`agent=true` 读"我和 Agent 的私聊" |
 | `ping` | C→S | — | 回 `pong` |
 | `system` | S→C | `msg` | 回执/系统提示 |
 | `group` / `private` | S→C | `sender`, `msg`, (`id`, `target`), (`msg_type`, `image`) | 广播/单播。`private` 会同时回显给发送方（带 `target`），这样自己的私聊会话里也能看到刚发出去的那条。图片消息带 `msg_type="image"` 和文件名 `image` |
-| `agent` | S→C | `sender`, `msg`, `status`(`pending`/`done`), `scope`, `steps`, (`scheduled`) | Agent 先推「正在思考」，再推结果。`steps` 是本轮真实工具调用记录（`name`/`args`/`ok`/`ms`/`preview`），`scheduled=true` 表示定时总结 |
+| `agent` | S→C | `sender`, `msg`, `status`(`pending`/`done`), `scope`, `thread`, `steps`, (`scheduled`) | Agent 先推「正在思考」，再推结果。`thread` 告诉客户端这条该落在 `main` 还是 `agent` 会话；`steps` 是本轮真实工具调用记录（`name`/`args`/`ok`/`ms`/`preview`），`scheduled=true` 表示定时总结 |
+| `agent_ask` | S→C | `sender`, `msg`, `scope`, `id` | 只发给提问者：私下问 Agent 的提问回执（落在「Agent」会话里） |
 | `autosummary` | S→C | `enabled`, `seconds` | 定时总结状态变化时广播给所有人 |
 | `userlist` | S→C | `users` | 在线用户列表 |
 | `todos` | S→C | `items` | 当前房间待办（`id/assignee/content/status/created_at/done_at`） |
@@ -394,8 +403,8 @@ DAO 层的几个约定：
 
 | 工具 | 作用 | 参数 | 依赖 |
 | --- | --- | --- | --- |
-| `read_recent_chat_history` | 读当前房间最近消息，按时间正序返回 | `limit` | SQLite |
-| `search_chat_history` | 关键词 OR 检索历史消息 | `keywords`, `limit` | SQLite |
+| `read_recent_chat_history` | 读最近消息，按时间正序返回 | `limit`, `scope`（`group` / `agent_private`，后者仅在授权时出现） | SQLite |
+| `search_chat_history` | 关键词 OR 检索历史消息 | `keywords`, `limit`, `scope` | SQLite |
 | `save_history_and_todo` | 把总结/待办写库（`kind`=`summary`/`todo`） | `content`, `kind` | SQLite |
 | `get_current_time` | 读**服务器所在机器的真实系统时间**：日期、星期、时区、Unix 时间戳 | — | 无（`datetime.now()`） |
 | `tavily_search` | 联网搜索实时信息 | `query`, `max_results`, `max_content_length` | `TAVILY_API_KEY` |
@@ -405,9 +414,9 @@ DAO 层的几个约定：
 安全设计（重点，课设要求 Agent 只能碰"授权范围内"的内容）：
 
 1. **`room_id` 不出现在工具 schema 里**。`build_room_tools()` 用闭包把服务端算好的 `room_id` 绑进工具实现，模型看不到也填不了，从根上杜绝「让它去读别人房间」。
-2. **Agent 永远只绑群聊房间**。`handle_agent` 无论用户在群聊还是私聊里提问，传给 Agent 的都是 `chat_service.group_room_id()`（`main`），不是 `ctx.room_id`。
-3. **工具层再加一道护栏**。`_require_group_room()` 在每次读/写前查 `rooms.room_type`，私聊房间直接返回 `[ToolError] 当前会话是私聊房间，不在 Agent 的授权范围内`，模型只能如实告诉用户看不到。
-4. **私聊问答不落群聊历史**。`scope=private` 的回复只单播给提问者，不会写进 `main` 的历史表，否则以后群里的总结会把两个人的私聊问答翻出来。
+2. **两段授权范围，房间号都在闭包里**。`build_room_tools()` 只把 `group`（群聊）和（获授权时）`agent_private`（**发起人自己**与 Agent 的私聊）两个 scope 交给模型选，`pm:a:b` 从来不在这张表里，模型既填不出也猜不到。
+3. **授权是每轮请求的开关**。只有客户端在提问时带 `include_private: true`，服务端才把 `agent:<user>` 绑进工具，并在这一轮的提示词里明确写出这层授权；没勾时 schema 里连 `scope` 字段都没有，硬传 `agent_private` 会收到 `[ToolError] 本次任务没有读取私聊记录的授权`。
+4. **问答各自落库、互不串味**。`scope=group` 的提问和回答都进 `main`（全群可见）；`scope=private` 的提问和回答只进 `agent:<我>`，只推给本人，绝不写进群聊历史。
 5. **工具返回内容是数据，不是指令**。system prompt 明确要求模型不执行工具结果里出现的命令式文字，防提示词注入。
 
 其它防护：单次工具结果截断到 4000 字符；工具参数类型错误时把错误信息回给模型让它自我纠正；Agent 调用放在独立线程池（4 worker），不阻塞连接线程；模型没配 Key 时 `AgentUnavailable` 被转成一条普通回复，聊天室照常收发。
@@ -444,8 +453,8 @@ DAO 层的几个约定：
 - 聊天室固定一个 `main` 群，没有建群 / 拉人 / 退群；私聊按 `pm:a:b` 自动建房间（见上面「房间模型」）。
 - 终端里的消息日志单行截断到 300 字；GBK 控制台下 emoji 显示为 `?`（用 Windows Terminal / `chcp 65001` 可正常显示）。
 - 图片服务没有做鉴权：局域网内谁都能 `POST /upload`（只限制了类型和 8MB 大小）。课设演示够用，上公网要加 token。
-- Agent 提问只在本地回显（让你看清自己问了什么），不广播也不落库，刷新后消失；答案不受影响（群内公开的答案会落库）。私聊提问尤其不能进群聊历史。
-- 私聊里问 Agent 的回答不落库（`scope=private` 只单播给提问者），刷新页面后看不到历史；这是刻意的，避免私聊问答被群聊总结翻出来。
+- Agent 提问和回答都会落库：群里问的进 `main`，私下问的进 `agent:<我>`（只有本人能读）。历史里的 Agent 卡片不保存 `steps`，会显示"历史记录 · 工具调用细节未保存"。
+- 「包含我与 Agent 的私聊」是一个**会公开**的操作：总结结果发到群里，勾选后私聊里的内容可能被写进群总结。界面上有提示，但仍属于用户的主动选择。
 - 定时总结以"群聊新消息条数"为触发门槛，没有做持久化游标，服务端重启后会把最近 40 条重新算一次（`_summary_cursor` 存在内存里）。
 - 窗口宽度小于 1180px 时右侧栏隐藏，小于 820px 时侧栏也隐藏，只留会话区；高分屏缩放交给浏览器/系统处理。
 

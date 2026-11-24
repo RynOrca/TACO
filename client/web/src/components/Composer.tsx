@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ComposeMode } from '../use-chat';
+import { AGENT } from '../types';
 import { EmojiPicker } from './EmojiPicker';
 
 interface Props {
@@ -75,7 +76,10 @@ export function Composer({ thread, target, isPM, disabled, onSend, onImage }: Pr
     }
   };
 
-  const active = MODES.find((m) => m.key === mode) ?? MODES[0];
+  const isAgentThread = thread === AGENT;
+  const active = isAgentThread
+    ? { key: 'agent' as ComposeMode, label: 'Agent', hint: '在这个会话里发的每句话都是问 Agent，答案只回给你' }
+    : (MODES.find((m) => m.key === mode) ?? MODES[0]);
   const chipLabel = (item: (typeof MODES)[number]) =>
     item.key === 'chat' ? (isPM ? '私聊' : '群聊') : item.label;
 
@@ -89,7 +93,9 @@ export function Composer({ thread, target, isPM, disabled, onSend, onImage }: Pr
           value={text}
           spellCheck={false}
           disabled={disabled}
-          placeholder={disabled ? '先登录，登录后这里就能发消息' : `发送到 ${target}…`}
+          placeholder={
+            disabled ? '先登录，登录后这里就能发消息' : isAgentThread ? '问 Agent…' : `发送到 ${target}…`
+          }
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={(e) => {
@@ -101,7 +107,7 @@ export function Composer({ thread, target, isPM, disabled, onSend, onImage }: Pr
           }}
         />
         <div className="box-foot">
-          {MODES.map((item) => (
+          {!isAgentThread && MODES.map((item) => (
             <button
               key={item.key}
               type="button"
