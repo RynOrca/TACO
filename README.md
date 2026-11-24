@@ -132,7 +132,7 @@ DOM 渲染 / 布局 / 滚动           原生 socket + pack_message/try_unpack  
 
 桥自己只懂两条额外指令：`{"type":"reconnect"}`（让桥重新连服务端），以及它主动推送的 `{"type":"link","state":"open|connecting|closed","detail":"…"}`（前端据此显示连接状态）。其余消息体与 TCP 上的完全一致，见[通信协议](#通信协议)。
 
-## 自定义功能（课设第 5 条要求的"至少两个"）
+## 自定义功能
 
 | 功能 | 实现位置 | 说明 |
 | --- | --- | --- |
@@ -140,19 +140,6 @@ DOM 渲染 / 布局 / 滚动           原生 socket + pack_message/try_unpack  
 | 表情与图片消息 | `web/src/emoji.ts`、`web/src/upload.ts`、`network/image_server.py` | 表情是纯文本；图片走 HTTP 上传 + 文件名入消息，支持粘贴截图 |
 | Agent 定时总结 | `services/scheduler.py`、`chat_service.py#run_scheduled_summary` | 后台线程按间隔让 Agent 总结群聊并广播，有新消息才总结，间隔可随时改 |
 | Agent 真实工具调用记录 | `agent/agent_core.py#execute_tool` | 每次工具调用的名字/参数/耗时/结果预览随回复发到界面，答辩可直接对着讲 |
-
-## 与课设要求的对应关系
-
-| 要求 | 落地情况 | 看哪里 |
-| --- | --- | --- |
-| 1. TCP 连接、多客户端同时在线、消息收发、断线处理、粘包拆分 | 每条连接一个线程；`TLV` 帧（类型 + 长度 + JSON），缓冲区累积处理半包、一次 `recv` 多包循环解；断开时从在线表摘掉并广播新的 `userlist` | `network/socket_server.py`、`network/protocol.py` |
-| 2. 注册登录、在线列表、一对一私聊、多人群聊广播、消息展示、可操作界面 | 全部具备；密码 PBKDF2-SHA256 加盐；Vite + React 三栏界面 | `services/user_service.py`、`client/web/` |
-| 3. 接入 Agent 作为虚拟成员，`@Agent` / 指令触发，问答 + 群聊总结 + 待办提取，结果发回聊天室 | `@Agent 问题`（群里公开）、`/agent`（只回我）、右栏快捷按钮；总结/待办走 `save_history_and_todo` 落库 | `services/chat_service.py#handle_agent`、`agent/` |
-| 4. 至少一种真实工具调用，服务端函数或 HTTP API 实际执行，展示调用记录 | 5 个工具全部真实执行（SQLite 查询、`datetime.now()`、Tavily HTTP）；`steps` 记录名称/参数/耗时/结果预览，界面逐条展开 | `agent/agent_core.py#execute_tool`、`components/Message.tsx` |
-| 5. 自定义两个以上功能 | 聊天记录持久化与检索、表情与图片消息、Agent 定时总结（外加真实工具调用记录展示） | 见上面「自定义功能」 |
-| 6. 模型不可用时基本通信仍正常 | Key 留空/接口挂了只影响 Agent：登录、群聊、私聊、历史、图片全部照常；Agent 回一句「暂不可用」 | `agent_core.get_client()` 抛 `AgentUnavailable` → 转成普通回复 |
-| 验收：三个客户端同时在线、私聊与群聊、异常断线 | 桥给每个页面一条独立 TCP 连接，开三个窗口就是三个客户端；关掉一个窗口，别人面板里的成员立刻消失 | `client/bridge.py`、`server` 的 `userlist` 推送 |
-| 验收：群里 `@Agent` 走完「读授权记录 → 摘要/待办 → 回复群聊」并展示调用记录 | `@Agent 总结一下最近的讨论`：`read_recent_chat_history` → `save_history_and_todo` 两步都会显示在卡片里 | 同上 |
 
 ## 快速开始
 
@@ -197,7 +184,7 @@ python -m server.storage.chat_history
 ### 5. 启动服务端
 
 ```bash
-python -m server.main
+python -m server.main 
 ```
 
 正常输出：
@@ -291,29 +278,6 @@ python -m client.socket_client
 - Windows 终端默认 GBK，emoji 会显示成 `?`；用 Windows Terminal 或先 `chcp 65001` 就能正常显示。控制台编码不影响消息本身，也不会让线程抛 `UnicodeEncodeError`（`make_console_safe()` 兜底）
 - 输出被重定向到文件时自动切 UTF-8，`python -m server.main > server.log` 出来的日志用任何编辑器打开都不会乱码
 
-## 环境变量
-
-全部配置集中在 `server/config.py`，通过 `python-dotenv` 加载。加载顺序：`<项目根>/.env` → `server/.env`，命中第一个就停止。
-
-| 变量 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `CHAT_HOST` | 否 | `0.0.0.0` | 服务端监听地址。`0.0.0.0` 允许局域网内其他机器连接，只想本机测试填 `127.0.0.1` |
-| `CHAT_PORT` | 否 | `10086` | 监听端口。客户端 `socket_client.py` 顶部的 `PORT` 不读 `.env`，改端口要两边一起改 |
-| `CHAT_DB_PATH` | 否 | `<项目根>/database/chat.db` | SQLite 文件路径。**不要写成空值**：空字符串会让 sqlite 打开临时库，每个线程一个、重启即丢 |
-| `CHAT_IMAGE_PORT` | 否 | `10087` | 图片消息用的 HTTP 服务端口（见下面「图片消息为什么要多一个 HTTP 服务」） |
-| `CHAT_IMAGE_DIR` | 否 | `<数据库目录>/images` | 图片落盘目录 |
-| `CHAT_IMAGE_MAX_BYTES` | 否 | `8388608` | 单张图片字节上限，超出直接 413 |
-| `AGENT_AUTO_SUMMARY_SECONDS` | 否 | `0` | 服务端启动时的定时总结间隔（秒）。`0` = 关闭，客户端可用 `/auto 5` 临时开启 |
-| `AGENT_AUTO_SUMMARY_MIN_MESSAGES` | 否 | `3` | 自动总结的门槛：至少积累这么多条**人发的新消息**才总结；手动触发不受限制 |
-| `LLM_API_KEY` | 否 | 空 | OpenAI 兼容接口的 Key。**留空也能启动**：聊天室收发完全正常，Agent 回复一句「暂不可用」（课设要求「模型不可用时聊天室基本通信仍正常」） |
-| `LLM_BASE_URL` | 否 | OpenAI 官方 | 第三方兼容接口填完整地址（一般带 `/v1`）。用官方接口请把整行**注释掉**，写成空值会导致每次请求 `APIConnectionError` |
-| `LLM_MODEL_ID` | 否 | 空 | 模型 ID，必须与服务商名称一致，如 `gpt-4o-mini` / `deepseek-chat` / `qwen-plus`。与 Key 一起缺失时只影响 Agent |
-| `TAVILY_API_KEY` | 否 | 空 | 仅 `tavily_search` 工具使用。为空时 Agent 仍可运行，联网搜索会返回工具错误 |
-| `AGENT_MAX_STEPS` | 否 | `5` | ReAct 最大循环步数（模型最多几轮「调工具 → 看结果」） |
-| `AGENT_TIMEOUT` | 否 | `60` | 仅用于失败提示文案，当前**没有**真正中断模型调用 |
-| `MAX_HISTORY` | 否 | `20` | 预留给单次读取历史条数上限，当前**未被任何代码使用** |
-
-`_int()` 会把空值或非法整数（如 `CHAT_PORT=abc`）回退成默认值并打印一行提示，不会让服务起不来。
 
 ## 通信协议
 
