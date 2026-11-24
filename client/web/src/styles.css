@@ -1460,6 +1460,77 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+/* /help 使用说明 */
+.sheet.wide {
+  width: min(640px, 94vw);
+  max-height: 84vh;
+  overflow-y: auto;
+}
+
+.help-lead {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.help-lead code {
+  padding: 0 4px;
+  border: 1px solid var(--rule);
+  background: var(--surface-2);
+  font: 400 11.5px/1.5 var(--mono);
+}
+
+.help-h {
+  margin: 16px 0 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--ink);
+  color: var(--ink);
+  font: 400 10px/1.6 var(--mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.help-list {
+  display: grid;
+}
+
+.help-row {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  gap: 12px;
+  padding: 5px 0;
+  border-top: 1px dashed var(--rule);
+  align-items: baseline;
+}
+
+.help-row:first-child {
+  border-top: 0;
+}
+
+.help-row span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: 400 11px/1.6 var(--mono);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 620px) {
+  .help-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
 /* ------------------------------------------------------------ 响应式 */
 @media (max-width: 1180px) {
   .app {

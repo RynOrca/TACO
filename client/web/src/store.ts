@@ -28,6 +28,8 @@ export interface State {
   autoSummary: { enabled: boolean; seconds: number };
   /** 让 Agent 总结时是否允许它读"我和 Agent 的私聊" */
   includePrivate: boolean;
+  /** /help 弹窗 */
+  help: boolean;
   /** 有更早的历史被插到前面，Transcript 要保住滚动位置 */
   prependToken: number;
   /** 需要滚到底部 */
@@ -49,6 +51,7 @@ export type Action =
   | { type: 'agent-request'; thread: string; scope: 'private' | 'group' }
   | { type: 'hello'; imageBase: string }
   | { type: 'include-private'; value: boolean }
+  | { type: 'help'; open: boolean }
   | { type: 'local'; kind: 'system' | 'error'; text: string };
 
 const emptyThread = (): ThreadState => ({
@@ -375,6 +378,9 @@ export function reducer(state: State, action: Action): State {
     case 'include-private':
       return { ...state, includePrivate: action.value };
 
+    case 'help':
+      return { ...state, help: action.open };
+
     case 'agent-request':
       return {
         ...state,
@@ -402,6 +408,7 @@ export function initialState(): State {
     imageBase: '',
     autoSummary: { enabled: false, seconds: 0 },
     includePrivate: false,
+    help: false,
     prependToken: 0,
     bottomToken: 0,
     todosDirty: 0,

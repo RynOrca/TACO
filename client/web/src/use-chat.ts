@@ -17,6 +17,7 @@ export interface Chat {
   sendImage: (file: File) => Promise<void>;
   autoSummary: (action: 'status' | 'on' | 'off' | 'now', minutes?: number) => void;
   setIncludePrivate: (value: boolean) => void;
+  setHelp: (open: boolean) => void;
   submitAuth: (kind: 'login' | 'register', user: string, password: string) => void;
   setAuthUser: (user: string) => void;
   openAuth: (open: boolean) => void;
@@ -126,6 +127,10 @@ export function useChat(): Chat {
     (raw: string, mode: ComposeMode) => {
       const text = raw.trim();
       if (!text) return;
+      if (/^\/(help|\?)$/i.test(text)) {
+        dispatch({ type: 'help', open: true });
+        return;
+      }
       const { me, active } = latest.current;
       if (!me) {
         dispatch({ type: 'auth-open', open: true });
@@ -223,6 +228,8 @@ export function useChat(): Chat {
     [send],
   );
 
+  const setHelp = useCallback((open: boolean) => dispatch({ type: 'help', open }), []);
+
   const setIncludePrivate = useCallback(
     (value: boolean) => dispatch({ type: 'include-private', value }),
     [],
@@ -267,6 +274,7 @@ export function useChat(): Chat {
     sendImage,
     autoSummary,
     setIncludePrivate,
+    setHelp,
     submitAuth,
     setAuthUser,
     openAuth,

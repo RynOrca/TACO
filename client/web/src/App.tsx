@@ -8,6 +8,7 @@ import { Composer } from './components/Composer';
 import { SidePanel } from './components/SidePanel';
 import { AuthGate } from './components/AuthGate';
 import { Prompt } from './components/Prompt';
+import { HelpDialog } from './components/HelpDialog';
 
 export default function App() {
   const chat = useChat();
@@ -79,6 +80,8 @@ export default function App() {
           onClose={() => chat.openAuth(false)}
         />
       )}
+
+      {state.help && <HelpDialog onClose={() => chat.setHelp(false)} />}
 
       {dialog === 'search' && (
         <Prompt

@@ -264,6 +264,7 @@ python -m client.socket_client
 | `/agent@group 问题` | 指定在群里公开回答 |
 | `/auto 5` / `/auto off` / `/auto now` | 定时总结：每 5 分钟 / 关闭 / 立刻总结一次（`/auto` 不带参数＝查状态） |
 | `/pm 目标用户 消息` | 私聊 |
+| `/help` | 弹出使用说明：全部指令 + 快捷键 + 功能一览（界面上也能在空会话里看到这条提示） |
 | `/register`、`/login`、`/quit` | 注册 / 登录 / 退出 |
 | 其他内容 | 直接作为群聊消息发送（图形界面点「图片」或 Ctrl+V 粘贴截图发图片） |
 
@@ -472,7 +473,9 @@ DAO 层的几个约定：
 | `use-chat.ts` | 状态 + 桥接 + 指令解析（`@Agent`、`/pm`、`/auto`…）的粘合层 |
 | `rich.tsx` | Agent 回复的轻量 markdown（加粗、行内代码、列表、标题） |
 | `emoji.ts` / `upload.ts` | 表情表 + "整条只有表情就放大"；图片压缩与上传 |
-| `components/` | Sidebar / Transcript / Message / Composer / EmojiPicker / SidePanel / AuthGate |
+| `components/` | Sidebar / Transcript / Message / Composer / EmojiPicker / SidePanel / AuthGate / HelpDialog |
+
+> 输入框里发 `/help` 会弹出「使用说明」：指令表（`@Agent`、`/agent`、`/auto`、`/pm`…）、快捷操作（Enter / Shift+Enter / 粘贴截图）和功能一览，`Esc` 关闭。
 
 几个刻意的实现选择：
 

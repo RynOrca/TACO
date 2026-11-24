@@ -82,13 +82,16 @@ export function Transcript({
             <p>直接在下面的输入框说话，会广播到 main 房间。</p>
             <ul>
               <li>
+                <code>@Agent 问题</code> 在群里公开回答
+              </li>
+              <li>
                 <code>/agent 问题</code> 只回给自己
               </li>
               <li>
-                <code>/agent@group 问题</code> 在群里公开回答
+                <code>/pm 用户名 消息</code> 发私聊
               </li>
               <li>
-                <code>/pm 用户名 消息</code> 发私聊
+                <code>/help</code> 查看全部指令和功能说明
               </li>
             </ul>
           </div>
