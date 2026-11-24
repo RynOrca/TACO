@@ -1,6 +1,7 @@
 import socket
 import threading
 from server import config
+from server.console import log_line
 from server.storage.db import close_db
 from server.network.protocol import pack_message, try_unpack
 from server.services.context import RequestContext
@@ -64,12 +65,12 @@ class SocketServer:
                         try:
                             conn.sendall(pack_message(reply))
                         except Exception as e:
-                            print(f"回包失败 {addr}: {e}")
+                            log_line(f"回包失败 {addr}: {e}")
                             break
         except Exception as e:
-            print(f"客户端 {addr} 异常: {e}")
+            log_line(f"客户端 {addr} 异常: {e}")
         finally:
             self.services.users.logout(ctx.user_id, conn)
             conn.close()
-            print(f"客户端 {addr} 已断开")
+            log_line(f"客户端 {addr} 已断开")
             self.services.users.push_userlist()

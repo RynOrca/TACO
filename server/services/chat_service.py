@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 
 from server import config
 from server.agent import agent_core
+from server.console import log_chat
 from server.models import Message
 from server.services.context import RequestContext, err
 from server.storage import chat_history
@@ -77,6 +78,9 @@ class ChatService:
         except Exception as e:
             return err("SAVE_FAILED", f"消息保存失败：{e}")
 
+        log_chat("群聊", ctx.user_id, f"[图片 {image}]" if image else content,
+                 ctx.room_id, "main", ctx.addr)
+
         payload = {
             "type": "group", "sender": ctx.user_id, "id": mid,
             "msg": "[图片]" if image else content,
@@ -104,11 +108,15 @@ class ChatService:
             return bad
 
         try:
+            room_name = self._pm_name(ctx.user_id, target)
             room_id = self._pm_room(ctx.user_id, target)
             mid = chat_history.save_message(
                 room_id, ctx.user_id, content, "image" if image else "private")
         except Exception as e:
             return err("SAVE_FAILED", f"消息保存失败：{e}")
+
+        log_chat("私聊", ctx.user_id, f"[图片 {image}]" if image else content,
+                 room_id, room_name, ctx.addr, target=target)
 
         # target 一并回传：发送方要据此决定这条私聊落在哪个会话里
         payload = {
@@ -126,10 +134,13 @@ class ChatService:
         return None
 
     @staticmethod
-    def _pm_room(a: str, b: str) -> int:
-        """两人私聊映射到一个固定房间，名字按字典序排序保证双向一致。"""
-        name = "pm:" + ":".join(sorted([a, b]))
-        return chat_history.ensure_room(name, room_type="private", owner_id=a)
+    def _pm_name(a: str, b: str) -> str:
+        """两人私聊的固定房间名，按字典序排序保证双向一致。"""
+        return "pm:" + ":".join(sorted([a, b]))
+
+    @classmethod
+    def _pm_room(cls, a: str, b: str) -> int:
+        return chat_history.ensure_room(cls._pm_name(a, b), room_type="private", owner_id=a)
 
     # ---------------------------------------------------------------- Agent
     def handle_agent(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
@@ -171,8 +182,10 @@ class ChatService:
                 payload["id"] = chat_history.save_message(room_id, "Agent", reply, "agent")
             except Exception as e:
                 print(f"[Agent] 回复落库失败: {e}")
+            log_chat("Agent", "Agent", reply, room_id, "main")
             self.users.broadcast(payload)
         else:
+            log_chat("Agent", "Agent", f"（只回 {user_id}）{reply}", room_id, "main")
             # 私聊问答只回给提问者，不写进群聊历史：否则群里以后能翻到别人的私聊问答
             self.users.send_to(user_id, payload, conn=conn)
 

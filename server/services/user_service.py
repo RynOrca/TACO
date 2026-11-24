@@ -7,6 +7,7 @@ import socket
 import threading
 from typing import Dict, List, Optional
 
+from server.console import log_line
 from server.network.protocol import pack_message
 from server.services.context import RequestContext, err
 from server.storage import chat_history
@@ -77,7 +78,7 @@ class UserService:
             conn.sendall(pack_message(msg))
             return True
         except Exception as e:
-            print(f"[User] 发送给 {user_id} 失败: {e}")
+            log_line(f"[User] 发送给 {user_id} 失败: {e}")
             return False
 
     def broadcast(self, msg: dict, exclude: Optional[str] = None) -> int:
@@ -112,7 +113,7 @@ class UserService:
         if not chat_history.create_user(user_id, nickname, hash_password(password)):
             return err("USER_EXISTS", f"用户名 {user_id} 已被注册")
 
-        print(f"用户 [{user_id}] 注册成功")
+        log_line(f"用户 [{user_id}] 注册成功")
         return {"type": "system", "msg": f"注册成功，请用 /login {user_id} 密码 登录"}
 
     def handle_login(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
@@ -141,6 +142,6 @@ class UserService:
         except Exception as e:
             print(f"[User] 登录落库失败 {user_id}: {e}")
 
-        print(f"用户 [{user_id}] 登录成功，room={ctx.room_id}")
+        log_line(f"用户 [{user_id}] 登录成功，room={ctx.room_id}")
         self.push_userlist()
         return {"type": "system", "msg": f"登录成功，当前房间 room_id={ctx.room_id}"}

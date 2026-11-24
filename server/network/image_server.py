@@ -15,6 +15,7 @@ from typing import Optional
 from urllib.parse import unquote
 
 from server import config
+from server.console import log_line
 
 EXT_BY_MIME = {
     "image/jpeg": ".jpg",
@@ -32,7 +33,7 @@ class ImageHandler(BaseHTTPRequestHandler):
 
     # 默认实现会把每条请求打到 stderr，这里统一走服务端日志格式
     def log_message(self, fmt: str, *args):
-        print(f"[Image] {self.address_string()} {fmt % args}")
+        log_line(f"[Image] {self.address_string()} {fmt % args}")
 
     # ---------------------------------------------------------------- 工具
     def _cors(self) -> None:
@@ -91,7 +92,7 @@ class ImageHandler(BaseHTTPRequestHandler):
         name = f"{uuid.uuid4().hex}{ext}"
         config.IMAGE_DIR.mkdir(parents=True, exist_ok=True)
         (config.IMAGE_DIR / name).write_bytes(data)
-        print(f"[Image] 收到图片 {name}（{length} 字节，{mime}）")
+        log_line(f"[Image] 收到图片 {name}（{length} 字节，{mime}）")
         self._send_json(200, {
             "file": name,
             "url": f"/img/{name}",
