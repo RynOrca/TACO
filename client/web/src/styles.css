@@ -604,6 +604,16 @@ textarea {
 }
 
 /* 关键：时间占右侧独立空间，名字太长就截名字，绝不挤掉时间 */
+/* 灰色备注：不抢边框，只当一行小字 */
+.tag.soft {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--faint);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .head .tm,
 .cont .tm {
   flex: 0 0 auto;

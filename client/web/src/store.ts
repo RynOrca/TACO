@@ -46,6 +46,7 @@ export type Action =
   | { type: 'history-failed'; thread: string }
   | { type: 'agent-request'; thread: string; scope: 'private' | 'group' }
   | { type: 'hello'; imageBase: string }
+  | { type: 'agent-ask'; thread: string; text: string; scope: 'private' | 'group' }
   | { type: 'local'; kind: 'system' | 'error'; text: string };
 
 const emptyThread = (): ThreadState => ({
@@ -352,6 +353,14 @@ export function reducer(state: State, action: Action): State {
     case 'local': {
       const event = makeEvent(action.kind, action.kind === 'system' ? '系统' : '错误', action.text);
       return appendEvent(state, state.active, event, true);
+    }
+
+    case 'agent-ask': {
+      // 提问在本地回显成一条自己的消息（服务端不保存 Agent 提问，私聊提问更不能进群聊历史）
+      const kind = action.thread === MAIN ? 'group' : 'private';
+      const event = makeEvent(kind, state.me ?? '我', action.text);
+      event.agentScope = action.scope;
+      return appendEvent(state, action.thread, event, state.active === action.thread);
     }
 
     case 'agent-request':

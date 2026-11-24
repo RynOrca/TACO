@@ -125,6 +125,11 @@ export function Message({
           {agent && event.scheduled && <span className="tag">定时总结</span>}
           {event.kind === 'private' && <span className="tag">私聊</span>}
           {mine && <span className="tag">我</span>}
+          {event.agentScope && (
+            <span className="tag soft">
+              (Agent {event.agentScope === 'group' ? '群内公开' : '只回我'})
+            </span>
+          )}
           <time className="tm" title={stampTitle(event)}>
             {event.time}
           </time>

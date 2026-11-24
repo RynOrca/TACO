@@ -54,6 +54,8 @@ export function buildRows(events: ChatEvent[]): Row[] {
     if (
       last &&
       event.kind !== 'agent' &&
+      !event.agentScope &&
+      !last.event.agentScope &&
       last.event.kind === event.kind &&
       last.event.sender === event.sender &&
       event.stamp - last.event.stamp <= GROUP_WINDOW &&

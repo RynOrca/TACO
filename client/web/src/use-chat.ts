@@ -89,6 +89,7 @@ export function useChat(): Chat {
         return;
       }
       const thread = scope === 'group' ? MAIN : active;
+      dispatch({ type: 'agent-ask', thread, text, scope });
       dispatch({ type: 'agent-request', thread, scope });
       if (!send({ type: 'agent', msg: text, scope })) {
         dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，Agent 请求没有发出去' });

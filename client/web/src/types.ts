@@ -82,6 +82,8 @@ export interface ChatEvent {
   /** Agent 本轮真实执行的工具调用 */
   steps?: ToolStep[];
   scheduled?: boolean;
+  /** 这条是自己发给 Agent 的提问，界面上加一条灰色备注 */
+  agentScope?: 'private' | 'group';
 }
 
 export interface ThreadState {
