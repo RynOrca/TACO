@@ -25,7 +25,7 @@ def main():
 
     # 图片消息的 HTTP 通道（聊天协议只传文件名，图片本体走这里）
     image_server = start_image_server(config.HOST, config.IMAGE_PORT)
-    print(f"图片服务启动成功，监听 {config.HOST}:{config.IMAGE_PORT}")
+    print(f"附件服务启动成功，监听 {config.HOST}:{config.IMAGE_PORT}（图片 / 文件上传下载）")
 
     # 心跳与断线检测：客户端 ping，服务端按 last_seen 回收半开连接
     reaper = IdleReaper(users)

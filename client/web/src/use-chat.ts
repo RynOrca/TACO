@@ -4,7 +4,7 @@ import { initialState, reducer } from './store';
 import type { State } from './store';
 import { AGENT, MAIN, PAGE_SIZE, threadUser } from './types';
 import type { SendMsg } from './types';
-import { uploadImage } from './upload';
+import { uploadAttachment } from './upload';
 
 export type ComposeMode = 'chat' | 'agent' | 'agent-group';
 
@@ -14,13 +14,14 @@ export interface Chat {
   loadOlder: () => void;
   sendText: (text: string, mode: ComposeMode) => void;
   askAgent: (question: string, scope: 'private' | 'group') => void;
-  sendImage: (file: File) => Promise<void>;
+  sendFile: (file: File) => Promise<void>;
   autoSummary: (action: 'status' | 'on' | 'off' | 'now', minutes?: number) => void;
   gameMove: (cell: number) => void;
   gameStart: () => void;
   gameQuit: () => void;
   setIncludePrivate: (value: boolean) => void;
   setHelp: (open: boolean) => void;
+  recall: (id: number) => void;
   submitAuth: (kind: 'login' | 'register', user: string, password: string) => void;
   setAuthUser: (user: string) => void;
   openAuth: (open: boolean) => void;
@@ -175,6 +176,29 @@ export function useChat(): Chat {
           send({ type: 'task', text: body });
           return;
         }
+        if (cmd === '/mute' || cmd === '/unmute' || cmd === '/muted') {
+          if (cmd === '/muted') {
+            send({ type: 'mute', action: 'list' });
+            return;
+          }
+          const [target, minutesText] = rest;
+          if (!target) {
+            dispatch({ type: 'local', kind: 'error', text: `用法：${cmd} 用户名${cmd === '/mute' ? ' 分钟数' : ''}` });
+            return;
+          }
+          const minutes = cmd === '/mute' ? Number(minutesText || 5) : 0;
+          if (cmd === '/mute' && (!Number.isFinite(minutes) || minutes < 1)) {
+            dispatch({ type: 'local', kind: 'error', text: '用法：/mute 用户名 分钟数（默认 5）' });
+            return;
+          }
+          send({
+            type: 'mute',
+            action: cmd === '/mute' ? 'mute' : 'unmute',
+            target,
+            ...(minutes ? { minutes } : {}),
+          });
+          return;
+        }
         if (cmd === '/auto') {
           const arg = (rest[0] || '').toLowerCase();
           if (!arg) send({ type: 'autosummary', action: 'status' });
@@ -209,7 +233,7 @@ export function useChat(): Chat {
     [askAgent, send],
   );
 
-  const sendImage = useCallback(
+  const sendFile = useCallback(
     async (file: File) => {
       const { me, active, imageBase } = latest.current;
       if (!me) {
@@ -217,16 +241,25 @@ export function useChat(): Chat {
         return;
       }
       try {
-        const uploaded = await uploadImage(file, imageBase);
+        const up = await uploadAttachment(file, imageBase);
+        const base = {
+          msg: up.kind === 'image' ? '[图片]' : `[文件 ${up.name}]`,
+          name: up.name,
+          size: up.bytes,
+          mime: up.mime,
+          ...(up.kind === 'image' ? { image: up.file } : { file: up.file }),
+        };
         const payload =
           active === MAIN
-            ? { type: 'group' as const, msg: '[图片]', image: uploaded.file }
-            : { type: 'private' as const, target: threadUser(active), msg: '[图片]', image: uploaded.file };
+            ? { type: 'group' as const, ...base }
+            : active === AGENT
+              ? { type: 'agent' as const, msg: base.msg, scope: 'private' as const }
+              : { type: 'private' as const, target: threadUser(active), ...base };
         if (!send(payload)) {
-          dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，图片没有发出去' });
+          dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，附件没有发出去' });
         }
       } catch (error) {
-        dispatch({ type: 'local', kind: 'error', text: `图片发送失败：${(error as Error).message}` });
+        dispatch({ type: 'local', kind: 'error', text: `发送失败：${(error as Error).message}` });
       }
     },
     [send],
@@ -239,6 +272,15 @@ export function useChat(): Chat {
     [send],
   );
 
+  const recall = useCallback(
+    (id: number) => {
+      if (!send({ type: 'recall', id })) {
+        dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，撤回请求没有发出去' });
+      }
+    },
+    [send],
+  );
+
   const gameMove = useCallback(
     (cell: number) => {
       if (!send({ type: 'game', text: `move ${cell}` })) {
@@ -247,16 +289,19 @@ export function useChat(): Chat {
     },
     [send],
   );
+
+  const setHelp = useCallback((open: boolean) => dispatch({ type: 'help', open }), []);
+
   const gameStart = useCallback(() => {
     if (!send({ type: 'game', text: 'start' })) {
       dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，开局指令没有发出去' });
     }
   }, [send]);
+
   const gameQuit = useCallback(() => {
     send({ type: 'game', text: 'quit' });
   }, [send]);
 
-  const setHelp = useCallback((open: boolean) => dispatch({ type: 'help', open }), []);
   const setIncludePrivate = useCallback(
     (value: boolean) => dispatch({ type: 'include-private', value }),
     [],
@@ -279,6 +324,53 @@ export function useChat(): Chat {
     requestHistory(state.active, false);
   }, [state.me, send, requestHistory]);
 
+  // 已读回执：把"我看到的最后一条"报给服务端，下次登录就不会再算离线未读
+  const readMark = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!state.me) return;
+    const thread = state.active;
+    const ids = (state.threads[thread]?.events ?? [])
+      .map((e) => e.id)
+      .filter((id): id is number => typeof id === 'number');
+    if (!ids.length) return;
+    const upto = Math.max(...ids);
+    if (readMark.current[thread] === upto) return;
+    readMark.current[thread] = upto;
+
+    const timer = window.setTimeout(() => {
+      const payload: SendMsg = { type: 'read', id: upto };
+      if (thread === AGENT) payload.agent = true;
+      else if (thread.startsWith('pm:')) payload.target = threadUser(thread);
+      send(payload);
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [state.me, state.active, state.threads, send]);
+
+  // 延迟监测：每 5 秒 ping 一次，15 秒没有 pong 就当超时
+  useEffect(() => {
+    if (state.link !== 'open') {
+      dispatch({ type: 'latency', ms: null });
+      return;
+    }
+    let alive = true;
+    const probe = () => {
+      if (!alive) return;
+      const sent = Date.now();
+      send({ type: 'ping', t: sent });
+      window.setTimeout(() => {
+        const last = latest.current.latency.at;
+        // 这一轮没有任何 pong（at 没被刷新）→ 判定超时
+        if (alive && (last === null || last < sent)) dispatch({ type: 'latency', ms: null });
+      }, 3000);
+    };
+    probe();
+    const timer = window.setInterval(probe, 5000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [state.link, send]);
+
   // 链路（重新）连通时探一下身份：桥重启后 TCP 连接是新的，服务端会回 NOT_LOGIN
   const lastLink = useRef(state.link);
   useEffect(() => {
@@ -298,13 +390,14 @@ export function useChat(): Chat {
     loadOlder,
     sendText,
     askAgent,
-    sendImage,
+    sendFile,
     autoSummary,
     gameMove,
     gameStart,
     gameQuit,
     setIncludePrivate,
     setHelp,
+    recall,
     submitAuth,
     setAuthUser,
     openAuth,

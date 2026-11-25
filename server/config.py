@@ -31,6 +31,18 @@ PORT = _int("CHAT_PORT", 10086)
 IMAGE_DIR = Path(os.getenv("CHAT_IMAGE_DIR", str(Path(DB_PATH).parent / "images")))
 IMAGE_PORT = _int("CHAT_IMAGE_PORT", 10087)
 IMAGE_MAX_BYTES = _int("CHAT_IMAGE_MAX_BYTES", 8 * 1024 * 1024)
+# 通用附件：白名单后缀（图片另按 Content-Type 判定）+ 单文件上限
+FILE_MAX_BYTES = _int("CHAT_FILE_MAX_BYTES", 20 * 1024 * 1024)
+FILE_EXT_ALLOWED = tuple(
+    ext.strip().lower() for ext in os.getenv(
+        "CHAT_FILE_EXTS",
+        ".pdf,.zip,.txt,.md,.csv,.log,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx,"
+        ".py,.js,.ts,.java,.c,.cpp,.h,.sql,.patch,.mp3,.mp4,.wav,.png,.jpg,.jpeg,.gif,.webp",
+    ).split(",") if ext.strip()
+)
+
+# 管理员（能禁言别人）：逗号分隔，留空则没人有权限
+ADMIN_USERS = [name.strip() for name in os.getenv("ADMIN_USERS", "").split(",") if name.strip()]
 
 AGENT_TIMEOUT = _int("AGENT_TIMEOUT", 60)
 AGENT_MAX_STEPS = _int("AGENT_MAX_STEPS", 5)

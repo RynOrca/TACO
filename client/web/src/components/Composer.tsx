@@ -8,6 +8,8 @@ interface Props {
   target: string;
   isPM: boolean;
   disabled: boolean;
+  /** 可以 @ 的对象：在线成员 + Agent */
+  members: string[];
   onSend: (text: string, mode: ComposeMode) => void;
   onImage: (file: File) => Promise<void>;
 }
@@ -18,10 +20,20 @@ const MODES: { key: ComposeMode; label: string; hint: string }[] = [
   { key: 'agent-group', label: 'Agent 群内公开', hint: '这条作为 Agent 提问，结果广播到群里' },
 ];
 
-export function Composer({ thread, target, isPM, disabled, onSend, onImage }: Props) {
+export function Composer({
+  thread,
+  target,
+  isPM,
+  disabled,
+  members,
+  onSend,
+  onImage,
+}: Props) {
   const [text, setText] = useState('');
   const [mode, setMode] = useState<ComposeMode>('chat');
   const [uploading, setUploading] = useState(false);
+  // @ 补全：query 是 @ 后面已经打出来的部分，index 是候选高亮项
+  const [mention, setMention] = useState<{ query: string; start: number; index: number } | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -43,7 +55,54 @@ export function Composer({ thread, target, isPM, disabled, onSend, onImage }: Pr
     box.current?.focus();
   };
 
+  const candidates = mention
+    ? members
+        .filter((name) => name.toLowerCase().startsWith(mention.query.toLowerCase()))
+        .slice(0, 6)
+    : [];
+
+  const applyMention = (name: string) => {
+    if (!mention) return;
+    const caret = mention.start + mention.query.length + 1;
+    const next = `${text.slice(0, mention.start)}@${name} ${text.slice(caret)}`;
+    setText(next);
+    setMention(null);
+    const pos = mention.start + name.length + 2;
+    requestAnimationFrame(() => {
+      box.current?.focus();
+      box.current?.setSelectionRange(pos, pos);
+    });
+  };
+
+  const syncMention = (value: string, caret: number) => {
+    const before = value.slice(0, caret);
+    const hit = /@([\w一-龥-]*)$/.exec(before);
+    if (!hit) {
+      setMention(null);
+      return;
+    }
+    setMention({ query: hit[1], start: caret - hit[0].length, index: 0 });
+  };
+
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mention && candidates.length) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const delta = event.key === 'ArrowDown' ? 1 : -1;
+        setMention({ ...mention, index: (mention.index + delta + candidates.length) % candidates.length });
+        return;
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        applyMention(candidates[mention.index] ?? candidates[0]);
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMention(null);
+        return;
+      }
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       submit();
@@ -86,6 +145,24 @@ export function Composer({ thread, target, isPM, disabled, onSend, onImage }: Pr
   return (
     <div className="composer">
       <div className={`box${disabled ? ' box-off' : ''}`}>
+        {mention && candidates.length > 0 && (
+          <div className="mention-menu">
+            {candidates.map((name, i) => (
+              <button
+                type="button"
+                key={name}
+                className={i === mention.index ? 'on' : ''}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  applyMention(name);
+                }}
+              >
+                @{name}
+              </button>
+            ))}
+            <span className="mention-hint">↑↓ 选择 · Enter 插入 · Esc 取消</span>
+          </div>
+        )}
         <textarea
           ref={box}
           className="inp"
@@ -96,8 +173,12 @@ export function Composer({ thread, target, isPM, disabled, onSend, onImage }: Pr
           placeholder={
             disabled ? '先登录，登录后这里就能发消息' : isAgentThread ? '问 Agent…' : `发送到 ${target}…`
           }
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            syncMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
+          }}
           onKeyDown={onKeyDown}
+          onBlur={() => setMention(null)}
           onPaste={(e) => {
             const file = Array.from(e.clipboardData.files)[0];
             if (file && file.type.startsWith('image/')) {
@@ -123,14 +204,14 @@ export function Composer({ thread, target, isPM, disabled, onSend, onImage }: Pr
             className="chip"
             disabled={disabled || uploading}
             onClick={() => fileInput.current?.click()}
-            title="发送图片（也可以直接 Ctrl+V 粘贴截图）"
+            title="发送图片或文件（也可以直接 Ctrl+V 粘贴截图）"
           >
-            {uploading ? '上传中…' : '图片'}
+            {uploading ? '上传中…' : '附件'}
           </button>
           <input
             ref={fileInput}
             type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp"
+            accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.zip,.txt,.md,.csv,.log,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.py,.js,.ts,.java,.c,.cpp,.h,.sql,.patch,.mp3,.mp4,.wav"
             hidden
             onChange={(e) => {
               void pickImage(e.target.files?.[0]);

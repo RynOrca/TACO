@@ -44,6 +44,7 @@ export default function App() {
 
         <Transcript
           events={thread.events}
+          offline={thread.offline}
           me={state.me}
           imageBase={state.imageBase}
           hasMore={thread.more}
@@ -51,15 +52,17 @@ export default function App() {
           prependToken={state.prependToken}
           bottomToken={state.bottomToken}
           onLoadOlder={chat.loadOlder}
+          onRecall={chat.recall}
         />
 
         <Composer
           thread={state.active}
           target={target}
           isPM={isPM}
+          members={[...state.online.filter((u) => u !== state.me), 'Agent']}
           disabled={!state.me || state.link !== 'open'}
           onSend={chat.sendText}
-          onImage={chat.sendImage}
+          onImage={chat.sendFile}
         />
       </main>
 

@@ -3,23 +3,31 @@
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 from server import config
 from server.agent import agent_core
 from server.console import log_chat, log_line
 from server.models import Message
+from server.network.image_server import EXT_BY_MIME
 from server.services import game_service
 from server.services.context import RequestContext, err
 from server.storage import chat_history
+from server.storage.db import parse_ts
 
 MAX_MSG_LEN = 2000
+# 撤回时限：超过这个秒数就不让撤了，避免翻旧账
+RECALL_WINDOW_SECONDS = 120
+# 用户名允许的字符，@提及从这里切
+MENTION_RE = re.compile(r"@([\w一-龥-]{1,32})")
+# 附件落盘名由服务端生成：32 位随机前缀 + 白名单后缀，客户端改不了路径
+STORED_NAME_RE = re.compile(r"^[0-9a-f]{32}\.[a-z0-9]{1,8}$")
 # 单页历史最多多少字节。超过就少给几条，避免把整个回包顶到协议单帧上限
 MAX_HISTORY_BYTES = 512 * 1024
 # Agent 回复落库/广播前的最大字节数，超了截断并标注
 MAX_AGENT_REPLY_BYTES = 32 * 1024
-# 图片文件名由图片服务生成：32 位十六进制 + 白名单后缀，客户端改不了路径
-IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{32}\.(?:jpg|jpeg|png|gif|webp)$")
 
 
 def _clamp_reply(text: str) -> str:
@@ -42,11 +50,22 @@ GAME_HELP = (
 )
 
 
-def validate_image(value) -> Optional[str]:
-    """客户端带上来的图片引用必须是图片服务真实存在的那张，否则不认。"""
-    if not isinstance(value, str) or not IMAGE_NAME_RE.match(value):
+def validate_attachment(value) -> Optional[str]:
+    """客户端带上来的附件引用必须是附件服务真实存在的那一份，否则不认。"""
+    if not isinstance(value, str):
+        return None
+    if not STORED_NAME_RE.match(value):
+        return None
+    suf = Path(value).suffix.lower()
+    allowed = tuple(EXT_BY_MIME.values()) + config.FILE_EXT_ALLOWED
+    if suf not in allowed:
         return None
     return value if (config.IMAGE_DIR / value).is_file() else None
+
+
+def attachment_kind(value: str) -> str:
+    """"image" 还是 "file"：按后缀判断，客户端说了不算。"""
+    return "image" if Path(value).suffix.lower() in EXT_BY_MIME.values() else "file"
 
 
 class ChatService:
@@ -69,18 +88,81 @@ class ChatService:
     @staticmethod
     def agent_room_id(user_id: str) -> int:
         """每个用户自己与 Agent 的私聊房间：只有本人能读写，别人（含别人的 Agent 任务）碰不到。"""
-        return chat_history.ensure_room(
+        room_id = chat_history.ensure_room(
             f"agent:{user_id}", room_type="private", owner_id=user_id)
+        chat_history.join_room(room_id, user_id)
+        return room_id
+
+    # ---------------------------------------------------------------- 禁言
+    @staticmethod
+    def mute_block(ctx: RequestContext) -> Optional[dict]:
+        """被禁言的人不能发言（私聊、群聊、问 Agent 都挡）。"""
+        muted = chat_history.active_mute(ctx.user_id)
+        if not muted:
+            return None
+        until = parse_ts(muted["until_at"])
+        left = int((until - datetime.now(timezone.utc)).total_seconds()) if until else 0
+        return err("MUTED", f"你被 {muted['by_user'] or '管理员'} 禁言中，还剩 {max(left, 1)} 秒")
+
+    def handle_mute(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
+        need = ctx.require_login()
+        if need:
+            return need
+        if ctx.user_id not in config.ADMIN_USERS:
+            return err("FORBIDDEN", "只有管理员能禁言/解禁（在 .env 里配置 ADMIN_USERS）")
+
+        action = (msg.get("action") or "list").strip()
+        if action == "list":
+            return {"type": "muted", "mutes": chat_history.active_mutes()}
+
+        target = (msg.get("target") or "").strip()
+        if not target:
+            return err("BAD_PARAM", "target 不能为空")
+        if target == ctx.user_id:
+            return err("BAD_PARAM", "不能禁言自己")
+        if chat_history.get_user(target) is None:
+            return err("NOT_FOUND", f"用户 {target} 不存在")
+
+        if action == "unmute":
+            removed = chat_history.unmute_user(target)
+            self.broadcast_mutes()
+            if not removed:
+                return err("BAD_STATE", f"{target} 当前没有被禁言")
+            return {"type": "system", "msg": f"{ctx.user_id} 解除了 {target} 的禁言"}
+
+        if action != "mute":
+            return err("BAD_PARAM", "action 只能是 mute / unmute / list")
+
+        try:
+            minutes = int(msg.get("minutes") or 5)
+        except (TypeError, ValueError):
+            return err("BAD_PARAM", "minutes 必须是整数分钟")
+        if not 1 <= minutes <= 1440:
+            return err("BAD_PARAM", "minutes 必须在 1-1440 之间（最长 24 小时）")
+
+        until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+        chat_history.mute_user(target, until.isoformat(timespec="seconds"),
+                               ctx.user_id, (msg.get("reason") or "").strip())
+        self.broadcast_mutes()
+        log_line(f"[禁言] {ctx.user_id} 禁言 {target} {minutes} 分钟")
+        return {"type": "system", "msg": f"{ctx.user_id} 禁言 {target} {minutes} 分钟"}
+
+    def broadcast_mutes(self) -> None:
+        self.users.broadcast({"type": "muted", "mutes": chat_history.active_mutes()})
 
     # ---------------------------------------------------------------- 群聊/私聊
     @staticmethod
     def _extract_body(msg: dict) -> Tuple[Optional[str], Optional[str], Optional[dict]]:
-        """返回（入库内容, 图片引用或 None, 错误回复）。"""
-        image = msg.get("image")
-        if image is not None:
-            ref = validate_image(image)
+        """返回（入库内容, 附件引用或 None, 错误回复）。
+
+        正文消息：content 就是用户打的字。
+        附件消息：content 存附件服务上的文件名，display 由 meta 补上原名/大小。
+        """
+        attachment = msg.get("file") if msg.get("file") is not None else msg.get("image")
+        if attachment is not None:
+            ref = validate_attachment(attachment)
             if ref is None:
-                return None, None, err("BAD_IMAGE", "图片引用无效或文件已丢失，请重新上传")
+                return None, None, err("BAD_ATTACHMENT", "附件引用无效或文件已丢失，请重新上传")
             return ref, ref, None
 
         content = (msg.get("msg") or "").strip()
@@ -94,27 +176,40 @@ class ChatService:
         need = ctx.require_login()
         if need:
             return need
+        muted = self.mute_block(ctx)
+        if muted:
+            return muted
 
-        content, image, bad = self._extract_body(msg)
+        content, attachment, bad = self._extract_body(msg)
         if bad:
             return bad
 
+        meta = self._attachment_meta(attachment, msg)
+        msg_type = attachment_kind(attachment) if attachment else "group"
         try:
             mid = chat_history.save_message(
-                ctx.room_id, ctx.user_id, content, "image" if image else "group")
+                ctx.room_id, ctx.user_id, content, msg_type, meta)
         except Exception as e:
             return err("SAVE_FAILED", f"消息保存失败：{e}")
 
-        log_chat("群聊", ctx.user_id, f"[图片 {image}]" if image else content,
+        log_chat("群聊", ctx.user_id, self._log_text(attachment, content, meta),
                  ctx.room_id, "main", ctx.addr)
+
+        # @提及：只认真实存在的用户名，前端据此高亮/提醒被提到的人
+        mentions = [n for n in dict.fromkeys(MENTION_RE.findall(content or ""))
+                    if n != ctx.user_id and chat_history.get_user(n) is not None]
 
         payload = {
             "type": "group", "sender": ctx.user_id, "id": mid,
-            "msg": "[图片]" if image else content,
+            "msg": self._msg_text(attachment, content, meta),
         }
-        if image:
-            payload["msg_type"] = "image"
-            payload["image"] = image
+        if mentions:
+            payload["mentions"] = mentions
+        if attachment:
+            payload["msg_type"] = msg_type
+            payload["image" if msg_type == "image" else "file"] = attachment
+            if meta:
+                payload["meta"] = meta
         # sender 由服务端填充！！！！
         self.users.broadcast(payload)
         return None
@@ -123,6 +218,9 @@ class ChatService:
         need = ctx.require_login()
         if need:
             return need
+        muted = self.mute_block(ctx)
+        if muted:
+            return muted
 
         target = (msg.get("target") or "").strip()
         if not target:
@@ -130,29 +228,33 @@ class ChatService:
         if target == ctx.user_id:
             return err("SELF_PM", "不能给自己发私聊")
 
-        content, image, bad = self._extract_body(msg)
+        content, attachment, bad = self._extract_body(msg)
         if bad:
             return bad
 
+        meta = self._attachment_meta(attachment, msg)
+        msg_type = attachment_kind(attachment) if attachment else "private"
         try:
             room_name = self._pm_name(ctx.user_id, target)
             room_id = self._pm_room(ctx.user_id, target)
             mid = chat_history.save_message(
-                room_id, ctx.user_id, content, "image" if image else "private")
+                room_id, ctx.user_id, content, msg_type, meta)
         except Exception as e:
             return err("SAVE_FAILED", f"消息保存失败：{e}")
 
-        log_chat("私聊", ctx.user_id, f"[图片 {image}]" if image else content,
+        log_chat("私聊", ctx.user_id, self._log_text(attachment, content, meta),
                  room_id, room_name, ctx.addr, target=target)
 
         # target 一并回传：发送方要据此决定这条私聊落在哪个会话里
         payload = {
             "type": "private", "sender": ctx.user_id, "target": target,
-            "msg": "[图片]" if image else content, "id": mid,
+            "msg": self._msg_text(attachment, content, meta), "id": mid,
         }
-        if image:
-            payload["msg_type"] = "image"
-            payload["image"] = image
+        if attachment:
+            payload["msg_type"] = msg_type
+            payload["image" if msg_type == "image" else "file"] = attachment
+            if meta:
+                payload["meta"] = meta
         delivered = self.users.send_to(target, payload)
         # 回显给自己，否则发送方本地的私聊会话里看不到自己刚发的那条
         ctx.send(payload)
@@ -161,19 +263,53 @@ class ChatService:
         return None
 
     @staticmethod
+    def _attachment_meta(attachment: Optional[str], msg: dict) -> Optional[dict]:
+        """附件消息的附加信息（原名、大小、类型），存进 messages.meta 供历史和界面使用。"""
+        if not attachment:
+            return None
+        meta = {
+            "name": (msg.get("name") or "").strip()[:160] or attachment,
+            "size": int(msg.get("size") or 0),
+            "mime": (msg.get("mime") or "").strip()[:80],
+        }
+        return meta
+
+    @staticmethod
+    def _msg_text(attachment: Optional[str], content: str, meta: Optional[dict]) -> str:
+        if not attachment:
+            return content
+        if attachment_kind(attachment) == "image":
+            return "[图片]"
+        return f"[文件 {(meta or {}).get('name') or attachment}]"
+
+    @classmethod
+    def _log_text(cls, attachment: Optional[str], content: str, meta: Optional[dict]) -> str:
+        if not attachment:
+            return content
+        kind = "图片" if attachment_kind(attachment) == "image" else "文件"
+        return f"[{kind} {(meta or {}).get('name') or attachment}]"
+
+    @staticmethod
     def _pm_name(a: str, b: str) -> str:
         """两人私聊的固定房间名，按字典序排序保证双向一致。"""
         return "pm:" + ":".join(sorted([a, b]))
 
     @classmethod
     def _pm_room(cls, a: str, b: str) -> int:
-        return chat_history.ensure_room(cls._pm_name(a, b), room_type="private", owner_id=a)
+        room_id = chat_history.ensure_room(cls._pm_name(a, b), room_type="private", owner_id=a)
+        # 双方都登记成成员，登录时才知道"我参与过哪些私聊"，用来算离线未读
+        chat_history.join_room(room_id, a)
+        chat_history.join_room(room_id, b)
+        return room_id
 
     # ---------------------------------------------------------------- Agent
     def handle_agent(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
         need = ctx.require_login()
         if need:
             return need
+        muted = self.mute_block(ctx)
+        if muted:
+            return muted
 
         text = (msg.get("msg") or "").strip()
         if not text:
@@ -258,6 +394,51 @@ class ChatService:
             log_chat("Agent", "Agent", f"（只回 {user_id}）{reply}", answer_room,
                      f"agent:{user_id}")
             self.users.send_to(user_id, payload, conn=conn)
+
+    # ---------------------------------------------------------------- 撤回
+    def handle_recall(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
+        need = ctx.require_login()
+        if need:
+            return need
+        try:
+            msg_id = int(msg.get("id"))
+        except (TypeError, ValueError):
+            return err("BAD_PARAM", "撤回需要带上消息 id")
+
+        row = chat_history.get_message(msg_id)
+        if row is None:
+            return err("NOT_FOUND", "消息不存在")
+        if row["sender"] != ctx.user_id:
+            return err("FORBIDDEN", "只能撤回自己发的消息")
+        if row["msg_type"] in ("recalled", "summary"):
+            return err("BAD_STATE", "这条消息不能撤回")
+
+        created = parse_ts(row["created_at"])
+        if created is not None:
+            age = (datetime.now(timezone.utc) - created).total_seconds()
+            if age > RECALL_WINDOW_SECONDS:
+                return err("TOO_LATE", f"超过 {RECALL_WINDOW_SECONDS // 60} 分钟，不能撤回")
+
+        if not chat_history.recall_message(msg_id, ctx.user_id):
+            return err("FAILED", "撤回失败，请重试")
+
+        payload = {"type": "recall", "id": msg_id, "sender": ctx.user_id,
+                   "room_id": row["room_id"]}
+        room_name = chat_history.room_name(row["room_id"]) or ""
+        if room_name.startswith("agent:"):
+            # 我和 Agent 的私聊：只通知本人
+            ctx.send(payload)
+        elif room_name.startswith("pm:"):
+            other = room_name[3:].split(":")
+            target = next((n for n in other if n != ctx.user_id), None)
+            if target:
+                self.users.send_to(target, payload)
+            ctx.send(payload)
+        else:
+            self.users.broadcast(payload)
+
+        log_line(f"[撤回] {ctx.user_id} 撤回了 room {row['room_id']} 的消息 #{msg_id}")
+        return None
 
     # ---------------------------------------------------------------- 定时总结
     def submit_scheduled_summary(self, triggered_by: str = ""):
@@ -355,6 +536,10 @@ class ChatService:
         need = ctx.require_login()
         if need:
             return need
+        # 禁言是"不能发言"，下棋也算发言（会在群里广播棋谱），一并拦掉
+        muted = self.mute_block(ctx)
+        if muted:
+            return muted
 
         text = (msg.get("text") or "").strip()
         action, _, rest = text.partition(" ")
@@ -569,6 +754,7 @@ class ChatService:
                 "sender": m.sender,
                 "content": m.content,
                 "msg_type": m.msg_type,
+                "meta": m.meta,
                 "created_at": m.timestamp.isoformat() if m.timestamp else None,
             }
             for m in reversed(rows)
@@ -577,6 +763,25 @@ class ChatService:
                 "agent": bool(msg.get("agent")),
                 "before_id": before_id,
                 "more": trimmed or len(rows) >= chat_history._clamp(limit)}
+
+    def handle_read(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
+        """已读回执：客户端把"我看到的最后一条 id"报上来，下次登录就不算它未读了。"""
+        need = ctx.require_login()
+        if need:
+            return need
+        try:
+            if msg.get("agent"):
+                room_id = self.agent_room_id(ctx.user_id)
+            else:
+                target = (msg.get("target") or "").strip()
+                room_id = (chat_history.room_id_by_name(self._pm_name(ctx.user_id, target))
+                           if target else ctx.room_id)
+            if room_id is None:
+                return None
+            chat_history.mark_read(room_id, ctx.user_id, msg.get("id"))
+        except Exception as e:
+            log_line(f"[Read] 标记已读失败 {ctx.user_id}: {e}")
+        return None
 
     def handle_todos(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
         need = ctx.require_login()

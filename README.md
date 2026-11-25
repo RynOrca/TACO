@@ -17,6 +17,7 @@
 | v1.2 | **心跳与超时回收** | 拔网线/挂起虚拟机/暂停进程这类"半开连接"永远发现不了，用户一直挂在在线列表里 | `keepalive.py`、`user_service.py`、`socket_client.py`、`bridge.py` |
 | v1.3 | **定时任务泛化** | 原来只有写死的「定时总结」，间隔在内存里，重启就丢 | `scheduler.py`、`scheduled_tasks` 表、`/task` 指令 |
 | v1.4 | **井字棋 + 点击落子** | 新增一个"和 Agent 玩"的扩展功能，棋盘由服务端持有，Agent 必须调工具落子 | `game_service.py`、`GamePanel.tsx`、`game` 消息 |
+| v1.5 | **延迟监测 / 离线未读 / 撤回 / @提及 / 禁言 / 通用附件** | 六个实用功能：rtt 可观测、离线回来知道哪些是新的、发错了能撤回、@ 人能补全并高亮、管理员能禁言、图片之外还能传文档 | 见下面「功能总览」扩展行 |
 
 四项改动都单独提交过 commit，可以按功能回滚；前端 `client/web/dist` 已重新构建，不需要装 Node 也能直接跑。
 
@@ -41,6 +42,12 @@
 | 扩展 | 表情与图片 | Unicode 表情（纯表情放大）；图片压到最大边 1280，走 HTTP 上传，消息里只传文件名，支持 Ctrl+V 粘贴截图 |
 | 扩展 | 工具调用记录 | `steps` 字段回传 name/args/ok/ms/preview，答辩可直接展开 |
 | 扩展 | 定时任务 / 井字棋 | 见上，均超出课设「至少两个扩展」的要求 |
+| 扩展 | 延迟监测 | 每 5 秒 ping/pong 算 RTT（页面 → 桥 → TCP → 服务端整条链路），右栏显示 `rtt`，>200ms 标黄、超时标红 |
+| 扩展 | 离线消息提醒 | `room_reads` 记已读水位，登录时下发未读；侧栏徽标 + 历史里「离线期间 N 条新消息」虚线 |
+| 扩展 | 消息撤回 | 自己 2 分钟内的消息可撤回，按房间类型投递（群播 / 私聊双方 / Agent 房间只通知本人）；撤回内容不进 Agent 检索 |
+| 扩展 | @提及 | 服务端只认真实用户名；渲染高亮（@自己荧光色）、输入框补全、被 @ 时徽标变荧光 `@` |
+| 扩展 | 禁言 | `ADMIN_USERS` 限定；群聊/私聊/问 Agent 三条通道都拦并提示剩余秒数；成员面板与右栏同步标记 |
+| 扩展 | 通用附件 | 图片 + pdf/zip/文档/源码/音视频；落盘名 `<32hex><后缀>`，原名/大小存 `messages.meta`，界面渲染成文件卡片 |
 | 界面 | 图形客户端 | Vite + React 三栏界面，经 Python 桥接层走原生 TCP；支持登录、群聊、私聊、成员、待办、Agent 卡片、游戏面板、历史翻页 |
 
 ---
@@ -187,7 +194,8 @@ DOM 渲染 / 布局 / 滚动           原生 socket + pack_message/try_unpack  
 | 环节 | 做法 |
 | --- | --- |
 | 客户端发 | 桥和命令行客户端每 `CHAT_HEARTBEAT_SECONDS` 秒发 `{"type":"ping","seq":n,"ts":ms}` |
-| 服务端回 | 回 `{"type":"pong","seq":n,"server_time":ms}`，客户端用 `seq` 匹配发送时刻算 RTT |
+| 服务端回 | 回 `{"type":"pong","seq":n,"server_time":ms}`，桥/命令行用 `seq` 匹配发送时刻算 RTT；Web 前端发 `{"type":"ping","t":ms}`，服务端把 `t` 原样带回，前端用 `t` 算整条链路的 RTT |
+| 界面显示 | 右栏「会话」的 `rtt` 每 5 秒刷新，>200ms 标黄、超时/断链标红（前端探测与心跳共用 ping，互不干扰） |
 | 服务端记 | 收到**任何**帧都刷新该连接的 `last_seen`（正常聊天也算活着），不只是 ping |
 | 超时回收 | `IdleReaper` 每 `CHAT_REAP_INTERVAL` 秒扫一遍，超过 `CHAT_IDLE_TIMEOUT` 秒没数据的连接直接断开、广播 `userlist`，终端打 `[Heartbeat] ... 判定掉线` |
 | 内核兜底 | 连接建立时开 `SO_KEEPALIVE`（Windows 用 `SIO_KEEPALIVE_VALS` 设 10s/3s） |
@@ -221,19 +229,25 @@ python -m server.main
 | `task` | C→S | `text`（`list` / `add summary every:10` / `add reminder in:5 开会` / `del|on|off 编号`） | `ChatService.handle_task` |
 | `game` | C→S | `text`（`start` / `move 5` / `board` / `status` / `quit`） | `ChatService.handle_game` |
 | `history` | C→S | 可选 `target`、`agent`、`limit`、`before_id` | `ChatService.handle_history`；客户端不能指定 room_id |
-| `ping` | C→S | `seq`, `ts` | 回 `pong` |
+| `ping` | C→S | `seq`, `ts`（桥/CLI）或 `t`（Web 前端） | 回 `pong`，原样带回 `seq` / `t` |
+| `read` | C→S | `id`（我看到的最后一条）, 可选 `target`/`agent` | `handle_read` 推进已读水位 |
+| `recall` | C→S | `id` | `handle_recall`（2 分钟内、只能撤自己的） |
+| `mute` | C→S | `action`(`mute`/`unmute`/`list`), `target`, `minutes` | `handle_mute`（仅 `ADMIN_USERS`） |
 | `system` | S→C | `msg` | 回执/系统提示 |
-| `group` / `private` | S→C | `sender`, `msg`, (`id`, `target`), (`msg_type`, `image`) | 广播/单播；私聊同时回显给发送方 |
+| `group` / `private` | S→C | `sender`, `msg`, (`id`, `target`), (`msg_type`, `image`/`file`, `meta`, `mentions`) | 广播/单播；私聊同时回显给发送方；`meta` 是附件原名/大小，`mentions` 是被 @ 的用户名 |
 | `agent` | S→C | `sender`, `msg`, `status`(`pending`/`done`), `scope`, `thread`, `steps`, (`scheduled`) | `thread` 决定落在 `main` 还是 `agent`；`steps` 是本轮真实工具调用记录 |
 | `agent_ask` | S→C | `sender`, `msg`, `scope`, `id` | 只发给提问者 |
 | `autosummary` | S→C | `enabled`, `seconds` | 定时总结状态广播 |
+| `unread` | S→C | `unread_items` | 登录时下发各会话离线未读数、其中多少条 @我、上次读到的 id |
+| `recall` | S→C | `id`, `sender`, `room_id` | 撤回通知，按房间类型广播/单播 |
+| `muted` | S→C | `mutes` | 当前禁言名单（`user_id`/`until_at`/`by_user`） |
 | `game` | S→C | `action`(`state`/`closed`), `board`(9 格), `turn`, `over`, `result`, `score` | 只发给下棋本人，用于渲染可点击棋盘 |
 | `userlist` | S→C | `users` | 在线用户列表 |
 | `todos` | S→C | `items` | 当前房间待办 |
 | `history` | S→C | `items`, `target`, `before_id`, `more` | 历史消息，按时间正序 |
 | `error` | S→C | `code`, `msg` | 见下方错误码 |
 
-错误码：`NOT_LOGIN` `BAD_FORMAT` `BAD_TYPE` `UNKNOWN_TYPE` `INTERNAL` `BAD_LOGIN` `LOGIN_FAILED` `EMPTY_MSG` `MSG_TOO_LONG` `SAVE_FAILED` `BAD_PARAM` `SELF_PM` `USER_OFFLINE` `BAD_REGISTER` `USER_EXISTS` `NOT_REGISTERED` `BAD_PASSWORD` `BAD_IMAGE` `NO_SCHEDULER` `BAD_TASK` `NO_GAME` `BAD_MOVE` `BAD_GAME`。
+错误码：`NOT_LOGIN` `BAD_FORMAT` `BAD_TYPE` `UNKNOWN_TYPE` `INTERNAL` `BAD_LOGIN` `LOGIN_FAILED` `EMPTY_MSG` `MSG_TOO_LONG` `SAVE_FAILED` `BAD_PARAM` `SELF_PM` `USER_OFFLINE` `BAD_REGISTER` `USER_EXISTS` `NOT_REGISTERED` `BAD_PASSWORD` `BAD_IMAGE` `BAD_ATTACHMENT` `NO_SCHEDULER` `BAD_TASK` `NO_GAME` `BAD_MOVE` `BAD_GAME` `NOT_FOUND` `FORBIDDEN` `BAD_STATE` `TOO_LATE` `MUTED`。
 
 消息处理流程：
 
@@ -264,7 +278,9 @@ SQLite，WAL 模式 + 每线程一个连接（`threading.local`）+ `busy_timeou
 | `rooms` | `room_id`(PK), `name`(UNIQUE), `room_type`, `owner_id`, `created_at` | 群聊 `main`，私聊 `pm:用户A:用户B`（字典序） |
 | `users` | `user_id`(PK), `nickname`, `password_hash`, `status`, `last_login` | `password_hash` 存 `pbkdf2_sha256$轮数$盐$哈希` |
 | `room_members` | (`room_id`, `user_id`)(PK), `joined_at` | 成员关系，外键级联删除 |
-| `messages` | `id`(PK), `room_id`, `sender`, `content`, `msg_type`, `created_at` | `msg_type`：`group` / `private` / `image` / `agent` / `summary`；索引 `(room_id, created_at)`、`(sender)` |
+| `messages` | `id`(PK), `room_id`, `sender`, `content`, `msg_type`, `meta`, `created_at` | `msg_type`：`group` / `private` / `image` / `file` / `agent` / `agent_ask_group` / `agent_ask_private` / `recalled` / `summary`；`meta` 是附件消息的 JSON（原名/大小/类型），老库启动时自动 `ALTER TABLE` 补列；索引 `(room_id, created_at)`、`(sender)` |
+| `room_reads` | (`room_id`,`user_id`)(PK), `last_read_id`, `updated_at` | 已读水位，只前进不后退；登录时据此算离线未读 |
+| `mutes` | `user_id`(PK), `until_at`, `by_user`, `reason`, `created_at` | 禁言；查询时顺手清掉过期记录 |
 | `todos` | `id`(PK), `room_id`, `assignee`, `content`, `status`, `created_at`, `done_at` | `status`：`pending` / `done` |
 | `scheduled_tasks` | `id`, `kind`, `payload`, `interval_seconds`, `next_run`, `last_run`, `enabled`, `created_by`, `room_id`, `created_at` | 定时任务；`interval>0` 周期、`=0` 一次性；索引 `(enabled, next_run)` |
 
@@ -711,6 +727,9 @@ python -m client.bridge
 | `AGENT_AUTO_SUMMARY_SECONDS` | `0` | 启动时自动创建的 summary 任务周期（秒），0 关闭 |
 | `AGENT_AUTO_SUMMARY_MIN_MESSAGES` | `3` | 定时总结的"新消息条数"门槛 |
 | `MAX_HISTORY` | `20` | 定义了但当前未被读取 |
+| `CHAT_FILE_MAX_BYTES` | `20971520` | 通用附件单文件上限（20 MB） |
+| `CHAT_FILE_EXTS` | 见 `.env.example` | 附件后缀白名单（pdf/zip/文档/源码/音视频…） |
+| `ADMIN_USERS` | 空 | 能禁言/解禁的人，逗号分隔；留空则没人有权限 |
 
 ---
 
@@ -725,10 +744,19 @@ python -m client.bridge
 - 「包含我与 Agent 的私聊」会公开：勾选后私聊内容可能被写进群总结，界面有提示。
 - 定时总结的 `_summary_cursor` 仍在内存里，重启后会重新算最近 40 条；任务本身已落库。
 - 井字棋的棋局和战绩在内存里，服务端重启清空；每人同时一盘；刷新页面后要点一次「开始一局」/`/game` 才会恢复面板。
-- 心跳的 RTT 只打在桥/服务端终端日志里，界面上暂时没有延迟条。
 - 窗口宽度小于 1180px 时右侧栏隐藏，小于 820px 时侧栏也隐藏。
 
 ---
+- 终端里的消息日志单行截断到 300 字；GBK 控制台下 emoji 显示为 `?`（用 Windows Terminal / `chcp 65001` 可正常显示）。
+- 附件服务没有鉴权：局域网内谁都能 `POST /upload`（只限制了类型和大小）。上公网要加 token。
+- 禁言需要管理员权限，`ADMIN_USERS` 没配时 `/mute` 会提示 `FORBIDDEN`；判断只在这一层，没有更细的角色体系。
+- 已读水位按"看到最后一条消息的 id"推进，多端登录会互相覆盖（同一账号只保留一份水位）。
+- 被禁言的人还能下井字棋：`/game` 是独立 handler，禁言只拦群聊/私聊/问 Agent 三条通道。
+- 井字棋的棋盘会广播给全群（所有人都会看到别人在下棋），演示三人同时在线时会有刷屏感。
+
+## 还没做的
+
+`docs/待办-语音消息.md`：语音消息（用户录音 + Agent 语音播报）的可行性评估与落地方案。DeepSeek 2026-11-13 上线了官方 TTS（`POST /v1/tools/tts`，`stella`/`tide` 两个音色，`wav`/`pcm` 两种格式，`filter_markdown` 自动去掉 Markdown 再念），这条链路可行；文档里写了接口细节、计费、失败降级和"只念前 N 字"的取舍。
 
 ## 界面设计与实现
 

@@ -276,6 +276,68 @@ textarea {
   font: 400 9.5px/1 var(--mono);
 }
 
+/* 有人 @我：徽标换成 @，用荧光色挑出来 */
+.pill.at {
+  background: var(--accent);
+  color: var(--ink);
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
+
+/* @提及高亮 */
+.mention {
+  padding: 0 3px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--rule-strong);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.mention.me {
+  background: var(--accent);
+  border-bottom-color: var(--ink);
+}
+
+.mine .mention {
+  background: rgba(205, 242, 63, 0.65);
+}
+
+/* @ 补全菜单 */
+.mention-menu {
+  position: absolute;
+  left: 11px;
+  bottom: calc(100% + 6px);
+  z-index: 25;
+  width: 200px;
+  padding: 4px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  box-shadow: 4px 4px 0 rgba(16, 15, 13, 0.12);
+}
+
+.mention-menu button {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: 400 11.5px/1.6 var(--mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mention-menu button.on {
+  background: var(--accent);
+}
+
+.mention-hint {
+  display: block;
+  padding: 4px 8px 2px;
+  color: var(--faint);
+  font: 400 9.5px/1.5 var(--mono);
+}
+
 .ava {
   width: 28px;
   height: 28px;
@@ -523,6 +585,35 @@ textarea {
   background: var(--rule);
 }
 
+/* 离线未读分界线 */
+.offline-line {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  color: var(--ok);
+  font: 400 10px/1.6 var(--mono);
+  letter-spacing: 0.12em;
+}
+
+.offline-line::before,
+.offline-line::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--ok) 0 4px,
+    transparent 4px 8px
+  );
+  opacity: 0.5;
+}
+
+.offline-line span {
+  flex: none;
+}
+
 .empty {
   flex: none;
   margin: auto 0;
@@ -604,6 +695,29 @@ textarea {
 }
 
 /* 关键：时间占右侧独立空间，名字太长就截名字，绝不挤掉时间 */
+/* 撤回按钮：平时不占位，鼠标移到自己的消息上才出现 */
+.recall {
+  flex: none;
+  margin-left: 4px;
+  padding: 0 5px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  color: var(--muted);
+  font: 400 9.5px/1.6 var(--mono);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.msg:hover .recall {
+  opacity: 1;
+}
+
+.recall:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
 /* 灰色备注：不抢边框，只当一行小字 */
 .tag.soft {
   border: 0;
@@ -861,6 +975,7 @@ textarea {
 }
 
 .box {
+  position: relative;
   border: 1px solid var(--ink);
   background: var(--surface);
   padding: 9px 11px 8px;
@@ -1031,6 +1146,16 @@ textarea {
   color: var(--ok);
 }
 
+.mem .st.mute {
+  padding: 0 4px;
+  border: 1px solid var(--warn-line);
+  background: var(--warn-bg);
+  color: var(--warn);
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 9px;
+}
+
 .todo {
   display: grid;
   grid-template-columns: 13px minmax(0, 1fr);
@@ -1134,6 +1259,18 @@ textarea {
   color: var(--faint);
 }
 
+.kv .kv-ok {
+  color: var(--ok);
+}
+
+.kv .kv-warn {
+  color: var(--warn);
+}
+
+.kv .kv-bad {
+  color: #a33;
+}
+
 /* 图片消息 */
 .pic {
   margin: 2px 0 0;
@@ -1152,6 +1289,55 @@ textarea {
 
 .pic img:hover {
   filter: brightness(1.03);
+}
+
+/* 文件消息卡片 */
+.filecard {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 320px;
+  padding: 7px 10px;
+  border: 1px solid var(--ink);
+  background: var(--surface-2);
+  color: var(--ink);
+  text-decoration: none;
+  transition: background 0.12s ease;
+}
+
+.filecard:hover {
+  background: var(--accent-tint);
+}
+
+.filecard-ico {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  color: var(--ink);
+  font: 700 9px/1 var(--mono);
+  letter-spacing: 0.04em;
+}
+
+.filecard-main {
+  min-width: 0;
+  display: grid;
+}
+
+.filecard-name {
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 230px;
+}
+
+.filecard-meta {
+  color: var(--faint);
+  font: 400 9.5px/1.6 var(--mono);
 }
 
 /* 整条消息就是几个表情时放大 */

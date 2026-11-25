@@ -15,6 +15,8 @@ const COMMANDS: { key: string; desc: string }[] = [
   { key: '/task add reminder in:5 开会', desc: '5 分钟后广播一句提醒；把 in:5 换成 every:30 就是每 30 分钟提醒一次' },
   { key: '/task del|on|off 编号', desc: '删除 / 开启 / 暂停某个任务，任务落库，服务端重启后仍然在' },
   { key: '/pm 用户名 消息', desc: '发私聊，只有对方能看到，Agent 读不到' },
+  { key: '/mute 用户名 分钟', desc: '禁言某人（仅管理员，ADMIN_USERS 里配置）；右侧成员面板会出现「禁言」标记' },
+  { key: '/unmute 用户名', desc: '解除禁言；/muted 查看当前禁言名单' },
   { key: '/register 用户名 密码', desc: '注册新账号（密码用 PBKDF2-SHA256 加盐后存 SQLite）' },
   { key: '/login 用户名 密码', desc: '登录；同一个账号重复登录会踢掉旧连接' },
   { key: '/help', desc: '打开这个说明' },
@@ -25,7 +27,9 @@ const SHORTCUTS: { key: string; desc: string }[] = [
   { key: 'Shift + Enter', desc: '在输入框里换行' },
   { key: '群聊 / 私聊 / Agent 只回我 / Agent 群内公开', desc: '输入框上方的模式切换，决定这条消息发给谁' },
   { key: '表情', desc: '插入 emoji；整条消息只有 1-3 个表情时会放大显示' },
-  { key: '图片 / Ctrl + V', desc: '选图或直接粘贴截图（自动压到最大边 1280 再上传）' },
+  { key: '@ 开头', desc: '弹出成员补全，↑↓ 选择、Enter 插入；被 @ 的人徽标会变成荧光 @' },
+  { key: '附件 / Ctrl + V', desc: '发图片或文件（pdf/zip/文档/源码/音视频）：图片自动压到最大边 1280，文件原样上传' },
+  { key: '撤回', desc: '鼠标移到自己 2 分钟内的消息上，右上角出现「撤回」' },
   { key: '回到最新', desc: '往上翻历史后，右下角出现这个按钮' },
 ];
 
@@ -41,6 +45,9 @@ const FEATURES: { key: string; desc: string }[] = [
     desc: '右栏勾选「总结时把我与 Agent 的私聊也算进去」后，Agent 才能读 agent:<我> 这一份记录一起总结；不勾就只总结群聊',
   },
   { key: '历史翻页', desc: '首屏 20 条，滚到顶部自动加载更早的一页，视口位置不会跳' },
+  { key: '离线未读', desc: '别人在你离线时发的消息，登录后侧栏显示未读数，历史里用一条虚线标出"离线期间 N 条新消息"' },
+  { key: '延迟监测', desc: '右栏「会话」里的 rtt 是每 5 秒一次 ping 的往返时间，>200ms 标黄、超时标红' },
+  { key: '定时总结', desc: '到点自动总结群聊并广播；有新消息才会总结' },
   { key: '井字棋', desc: '服务端持有棋盘，Agent 只能通过 game_move 工具落子；模型不可用时用本地策略代打，棋局不会卡住' },
   { key: '定时任务', desc: '定时总结 / 定时提醒统一调度，任务存 SQLite，重启不丢；到点自动广播' },
 ];

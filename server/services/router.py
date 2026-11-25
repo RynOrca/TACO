@@ -35,13 +35,20 @@ class MessageRouter:
 
 
 def _handle_ping(ctx: RequestContext, msg: dict) -> dict:
-    """心跳应答：带回客户端 seq，并附服务端时间戳，客户端据此算 RTT。"""
-    return {
+    """心跳应答。
+
+    两套字段都回：`seq` 给命令行客户端/桥算 RTT，`t` 给 Web 前端算 RTT
+    （前端整条链路是 页面 → 桥 → TCP → 服务端，只有拿回原样时间戳才准）。
+    """
+    reply = {
         "type": "pong",
         "seq": msg.get("seq"),
         "server_time": int(time.time() * 1000),
         "msg": "pong",
     }
+    if msg.get("t") is not None:
+        reply["t"] = msg.get("t")
+    return reply
 
 
 def build_default_router(services) -> MessageRouter:
@@ -52,6 +59,9 @@ def build_default_router(services) -> MessageRouter:
     router.register("private", services.chat.handle_private)
     router.register("agent", services.chat.handle_agent)
     router.register("todos", services.chat.handle_todos)
+    router.register("read", services.chat.handle_read)
+    router.register("recall", services.chat.handle_recall)
+    router.register("mute", services.chat.handle_mute)
     router.register("history", services.chat.handle_history)
     # Agent 定时总结：查询状态 / 开 / 关 / 立刻跑一次
     router.register("autosummary", services.chat.handle_auto_summary)

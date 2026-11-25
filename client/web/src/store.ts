@@ -8,6 +8,7 @@ import type {
   ThreadState,
   TodoItem,
   ToolStep,
+  UnreadItem,
   EventKind,
 } from './types';
 import { dateKeyOf, parseStamp, timeOf } from './time';
@@ -31,6 +32,12 @@ export interface State {
   includePrivate: boolean;
   /** /help 弹窗 */
   help: boolean;
+  /** 网络延迟：最近一次 RTT（ms）与探测时刻 */
+  latency: { ms: number | null; at: number | null };
+  /** 服务端在登录成功前就推了未读回执，先存着，等 me 确定再落到会话上 */
+  unreadPending: UnreadItem[];
+  /** 被禁言的人 → 到期时间（ISO） */
+  mutes: Record<string, string>;
   /** 有更早的历史被插到前面，Transcript 要保住滚动位置 */
   prependToken: number;
   /** 需要滚到底部 */
@@ -55,6 +62,7 @@ export type Action =
   | { type: 'hello'; imageBase: string }
   | { type: 'include-private'; value: boolean }
   | { type: 'help'; open: boolean }
+  | { type: 'latency'; ms: number | null }
   | { type: 'local'; kind: 'system' | 'error'; text: string };
 
 const emptyThread = (): ThreadState => ({
@@ -63,6 +71,7 @@ const emptyThread = (): ThreadState => ({
   more: false,
   loading: false,
   unread: 0,
+  mentioned: false,
 });
 
 let seq = 0;
@@ -113,10 +122,18 @@ function appendEvent(state: State, key: string, event: ChatEvent, active: boolea
 
 /** 客户端渲染用的时间戳来自收到的时刻；历史消息用 created_at */
 function eventFromHistory(item: HistoryItem): ChatEvent {
+  // image / file 是"消息的载体"，会话归属还是 group / private
   const kind: EventKind =
-    item.msg_type === 'group' || item.msg_type === 'private' || item.msg_type === 'agent'
-      ? item.msg_type
+    item.msg_type === 'group' ||
+    item.msg_type === 'private' ||
+    item.msg_type === 'agent' ||
+    item.msg_type === 'image' ||
+    item.msg_type === 'file'
+      ? item.msg_type === 'image' || item.msg_type === 'file'
+        ? 'group'
+        : item.msg_type
       : 'system';
+  const inPM = Boolean(item.msg_type === 'private');
   const stamp = parseStamp(item.created_at);
   const date = new Date(stamp);
   const event: ChatEvent = {
@@ -129,10 +146,25 @@ function eventFromHistory(item: HistoryItem): ChatEvent {
     stamp,
     id: item.id,
   };
+  if (inPM) event.kind = 'private';
   if (kind === 'agent') event.status = 'done';
   if (item.msg_type === 'image') {
     event.image = item.content;
     event.text = '[图片]';
+  } else if (item.msg_type === 'file') {
+    event.attachment = {
+      ref: item.content,
+      kind: 'file',
+      name: showName(item.content, item.meta?.name),
+      size: item.meta?.size ?? 0,
+      mime: item.meta?.mime,
+    };
+    event.text = `[文件 ${event.attachment.name}]`;
+  }
+  if (item.msg_type === 'recalled') {
+    // 撤回的消息库里 content 是空的，历史里要还原成一条提示，否则会渲染成空白 SYSTEM 条
+    event.kind = 'recall';
+    event.text = `${item.sender || '有人'} 撤回了一条消息`;
   }
   if (item.msg_type === 'agent_ask_group' || item.msg_type === 'agent_ask_private') {
     event.kind = 'ask';
@@ -163,10 +195,55 @@ function mergeHistory(state: State, msg: ServerMsg, older: boolean): State {
     : { ...next, bottomToken: next.bottomToken + 1 };
 }
 
+function threadKeyOf(room: string, me: string | null): string | null {
+  if (room === MAIN) return MAIN;
+  if (room.startsWith('agent:')) return AGENT;
+  if (room.startsWith('pm:')) {
+    const other = room.slice(3).split(':').find((name) => name !== me);
+    return other ? pmThread(other) : null;
+  }
+  return null;
+}
+
+function markRecalled(state: State, id: number | undefined): State {
+  if (typeof id !== 'number') return state;
+  let changed = false;
+  const threads: Record<string, ThreadState> = {};
+  for (const [key, thread] of Object.entries(state.threads)) {
+    const events = thread.events.map((event) => {
+      if (event.id !== id || event.kind === 'recall') return event;
+      changed = true;
+      return {
+        ...event,
+        kind: 'recall' as const,
+        text: `${event.sender} 撤回了一条消息`,
+        image: undefined,
+      };
+    });
+    threads[key] = changed ? { ...thread, events } : thread;
+  }
+  return changed ? { ...state, threads } : state;
+}
+
+/** 存储名是 <32位随机>.<后缀>，给人看的是 meta.name，没有就退回存储名 */
+function showName(ref: string, name?: string): string {
+  return name || ref;
+}
+
 function applyExtras(event: ChatEvent, msg: ServerMsg): void {
   if (msg.msg_type === 'image' && msg.image) {
     event.image = msg.image;
     event.text = '[图片]';
+  }
+  if (msg.msg_type === 'file' && msg.file) {
+    event.attachment = {
+      ref: msg.file,
+      kind: 'file',
+      name: showName(msg.file, msg.meta?.name),
+      size: msg.meta?.size ?? 0,
+      mime: msg.meta?.mime,
+    };
+    event.text = `[文件 ${event.attachment.name}]`;
   }
   // 服务端每轮都会带 steps；历史消息没有这个字段，界面要能区分"没调工具"和"不知道调没调"
   if (msg.steps) event.steps = msg.steps as ToolStep[];
@@ -195,11 +272,32 @@ function onServer(state: State, msg: ServerMsg): State {
       const room = /room_id=(\d+)/.exec(text);
       if (room) next = { ...next, roomId: Number(room[1]) };
       if (text.includes('登录成功') && state.auth.pending) {
+        const me = state.auth.pending;
         next = {
           ...next,
-          me: state.auth.pending,
-          auth: { ...state.auth, open: false, busy: false, error: null, pending: null },
+          me,
+          auth: { ...next.auth, open: false, busy: false, error: null, pending: null },
         };
+        // 这里才知道"我"是谁，pm:a:b 这类房间名才能对应到具体会话
+        if (next.unreadPending.length) {
+          const threads = { ...next.threads };
+          for (const item of next.unreadPending) {
+            const key = threadKeyOf(item.room, me);
+            if (!key) continue;
+            const thread = threads[key] ?? emptyThread();
+            threads[key] = {
+              ...thread,
+              unread: item.unread,
+              mentioned: (item.mentions ?? 0) > 0,
+              offline: {
+                count: item.unread,
+                sinceId: item.last_read_id,
+                mentions: item.mentions ?? 0,
+              },
+            };
+          }
+          next = { ...next, threads, unreadPending: [] };
+        }
       } else if (next.auth.busy) {
         // 注册成功之类的系统回执也算一次应答，别让按钮一直转圈
         next = { ...next, auth: { ...next.auth, busy: false } };
@@ -212,7 +310,12 @@ function onServer(state: State, msg: ServerMsg): State {
       const event = makeEvent(ask ? 'ask' : 'group', msg.sender || '?', msg.msg ?? '', msg.id);
       if (ask) event.agentScope = 'group';
       applyExtras(event, msg);
-      return appendEvent(state, MAIN, event, state.active === MAIN);
+      if (msg.mentions?.length) event.mentions = msg.mentions;
+      const next = appendEvent(state, MAIN, event, state.active === MAIN);
+      // 别人在群里 @我、而我没在看这个会话 → 徽标换成 @
+      const met = Boolean(state.me) && (msg.mentions ?? []).includes(state.me!);
+      if (!met || state.active === MAIN) return next;
+      return withThread(next, MAIN, (thread) => ({ ...thread, mentioned: true }));
     }
 
     case 'agent_ask': {
@@ -260,6 +363,20 @@ function onServer(state: State, msg: ServerMsg): State {
     case 'history':
       return mergeHistory(state, msg, Boolean(msg.before_id));
 
+    case 'recall':
+      return markRecalled(state, msg.id);
+
+    case 'unread':
+      return { ...state, unreadPending: msg.unread_items ?? [] };
+
+    case 'muted': {
+      const mutes: Record<string, string> = {};
+      for (const item of msg.mutes ?? []) {
+        if (item && typeof item === 'object' && item.user_id) mutes[item.user_id] = item.until_at;
+      }
+      return { ...state, mutes };
+    }
+
     case 'todos':
       return { ...state, todos: (msg.items ?? []) as TodoItem[] };
 
@@ -274,6 +391,12 @@ function onServer(state: State, msg: ServerMsg): State {
 
     case 'hello':
       return { ...state, imageBase: msg.image_base ?? '' };
+
+    case 'pong':
+      // 只认自己发出去的那次探测（比对 t），心跳的 pong 不会污染读数
+      return typeof msg.t === 'number'
+        ? { ...state, latency: { ms: Math.max(0, Date.now() - msg.t), at: Date.now() } }
+        : state;
 
     case 'game': {
       if (msg.action === 'closed') return { ...state, game: null };
@@ -339,9 +462,10 @@ export function reducer(state: State, action: Action): State {
     case 'switch': {
       if (action.thread === state.active) return state;
       const thread = state.threads[action.thread];
-      const threads = thread && thread.unread
-        ? { ...state.threads, [action.thread]: { ...thread, unread: 0 } }
-        : state.threads;
+      const threads =
+        thread && (thread.unread || thread.mentioned)
+          ? { ...state.threads, [action.thread]: { ...thread, unread: 0, mentioned: false } }
+          : state.threads;
       return { ...state, active: action.thread, threads, bottomToken: state.bottomToken + 1 };
     }
 
@@ -400,6 +524,9 @@ export function reducer(state: State, action: Action): State {
     case 'help':
       return { ...state, help: action.open };
 
+    case 'latency':
+      return { ...state, latency: { ms: action.ms, at: Date.now() } };
+
     case 'agent-request':
       return {
         ...state,
@@ -428,6 +555,9 @@ export function initialState(): State {
     autoSummary: { enabled: false, seconds: 0 },
     includePrivate: false,
     help: false,
+    latency: { ms: null, at: null },
+    unreadPending: [],
+    mutes: {},
     prependToken: 0,
     bottomToken: 0,
     todosDirty: 0,

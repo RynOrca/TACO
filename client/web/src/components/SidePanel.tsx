@@ -44,7 +44,13 @@ export function SidePanel({
               {user.slice(0, 1).toUpperCase()}
             </span>
             <span className="nm">{user}</span>
-            <span className="st on">{user === state.me ? '我' : 'online'}</span>
+            {state.mutes[user] ? (
+              <span className="st mute" title={`到期：${state.mutes[user]}`}>
+                禁言
+              </span>
+            ) : (
+              <span className="st on">{user === state.me ? '我' : 'online'}</span>
+            )}
           </div>
         ))}
         <div className="mem">
@@ -117,6 +123,22 @@ export function SidePanel({
         </div>
       </section>
 
+      {Object.keys(state.mutes).length > 0 && (
+        <section>
+          <h2>禁言 {Object.keys(state.mutes).length}</h2>
+          {Object.entries(state.mutes).map(([user, until]) => (
+            <div className="mem" key={user}>
+              <span className="ava off">{user.slice(0, 1).toUpperCase()}</span>
+              <span className="nm">{user}</span>
+              <span className="st mute">{until.slice(11, 16)} 解除</span>
+            </div>
+          ))}
+          <p className="auto-hint">
+            <code>/mute 用户名 分钟</code> · <code>/unmute 用户名</code>（需 ADMIN_USERS）
+          </p>
+        </section>
+      )}
+
       <section>
         <h2>定时总结</h2>
         <div className="auto">
@@ -150,6 +172,10 @@ export function SidePanel({
           <span>{mainCount}</span>
           <span>link</span>
           <span>ws → tcp 10086</span>
+          <span>rtt</span>
+          <span className={latencyClass(state)}>
+            {state.link !== 'open' ? '-' : state.latency.ms === null ? '超时' : `${state.latency.ms} ms`}
+          </span>
           <span>image</span>
           <span>{state.imageBase || '-'}</span>
           <span>queue</span>
@@ -158,6 +184,14 @@ export function SidePanel({
       </section>
     </aside>
   );
+}
+
+function latencyClass(state: State): string {
+  if (state.link !== 'open') return 'kv-bad';
+  const ms = state.latency.ms;
+  if (ms === null) return 'kv-bad';
+  if (ms > 200) return 'kv-warn';
+  return 'kv-ok';
 }
 
 function firstLine(text: string | undefined): string {

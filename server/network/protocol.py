@@ -53,6 +53,11 @@ TYPE_CODE = {
     "autosummary": 13,
     "task": 14,
     "game": 15,
+    "read": 16,
+    "unread": 17,
+    "recall": 18,
+    "mute": 19,
+    "muted": 20,
 }
 
 CODE_TYPE = {code: name for name, code in TYPE_CODE.items()}

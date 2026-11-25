@@ -5,6 +5,7 @@ import { Message, Note } from './Message';
 
 interface Props {
   events: ChatEvent[];
+  offline?: { count: number; sinceId: number };
   me: string | null;
   imageBase: string;
   hasMore: boolean;
@@ -12,10 +13,12 @@ interface Props {
   prependToken: number;
   bottomToken: number;
   onLoadOlder: () => void;
+  onRecall: (id: number) => void;
 }
 
 export function Transcript({
   events,
+  offline,
   me,
   imageBase,
   hasMore,
@@ -23,12 +26,16 @@ export function Transcript({
   prependToken,
   bottomToken,
   onLoadOlder,
+  onRecall,
 }: Props) {
   const stream = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
   const anchor = useRef<{ height: number; top: number } | null>(null);
   const [awayFromBottom, setAwayFromBottom] = useState(false);
-  const rows = useMemo(() => buildRows(events), [events]);
+  const rows = useMemo(
+    () => buildRows(events, offline?.sinceId, offline?.count ?? 0),
+    [events, offline?.sinceId, offline?.count],
+  );
 
   const toBottom = (smooth = false) => {
     const el = stream.current;
@@ -104,6 +111,13 @@ export function Transcript({
                 </div>
               );
             }
+            if (row.type === 'divider') {
+              return (
+                <div className="offline-line" key={row.key}>
+                  <span>{row.label}</span>
+                </div>
+              );
+            }
             if (row.type === 'note') {
               return <Note key={row.key} tone={row.tone} items={row.items} />;
             }
@@ -114,6 +128,7 @@ export function Transcript({
                 cont={row.cont}
                 me={me}
                 imageBase={imageBase}
+                onRecall={onRecall}
               />
             );
           })

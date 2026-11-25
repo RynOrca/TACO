@@ -128,11 +128,13 @@ class Link:
     # ---------------------------------------------------------------- 收发
     def _on_tcp_message(self, msg: dict) -> None:
         if msg.get("type") == "pong":
-            # RTT 只用于服务端/桥的日志与后续扩展，不塞给前端（前端消息类型里没有 metrics）
+            # 桥自己发的心跳（带 seq）：算一条桥→服务端的 RTT，打日志即可
             rtt = self.client.note_pong(msg)
             if rtt is not None:
                 print(f"[Link] {self.client.host}:{self.client.port} RTT {rtt}ms")
-            return
+            # 前端发的探测（带 t）：必须继续往下推，页面才能算出整条链路的 RTT
+            if msg.get("t") is None:
+                return
         self.publish(msg)
 
     def send(self, msg: dict) -> None:

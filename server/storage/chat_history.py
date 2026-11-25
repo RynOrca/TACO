@@ -4,6 +4,8 @@
 
 # 不会，让ai写；内容教学放到docs/内
 
+import json
+import sqlite3
 from typing import List,Optional
 from server.storage.db import get_conn, transaction,now_iso,row_to_message
 from server.models import Message
@@ -43,6 +45,13 @@ def room_id_by_name(name: str) -> Optional[int]:
     return row["room_id"] if row else None
 
 
+def room_name(room_id: int) -> Optional[str]:
+    row = get_conn().execute(
+        "SELECT name FROM rooms WHERE room_id = ?", (int(room_id),)
+    ).fetchone()
+    return row["name"] if row else None
+
+
 def is_group_room(room_id: int) -> bool:
     """群聊房间还是私聊房间——Agent 工具用它守住授权边界。"""
     row = get_conn().execute(
@@ -77,15 +86,16 @@ def ensure_room(name: str, room_type: str = "group", owner_id: Optional[str] = N
 
 
 def save_message(room_id: int, sender: str, content: str,
-                 msg_type: str = "group") -> int:
+                 msg_type: str = "group", meta: Optional[dict] = None) -> int:
     _require_room(room_id)
     if not content or not content.strip():
         raise ValueError("content 不能为空")
+    payload = json.dumps(meta, ensure_ascii=False) if meta else None
     with transaction() as tx:
         cur = tx.execute(
-            """INSERT INTO messages (room_id, sender, content, msg_type, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (int(room_id), sender, content.strip(), msg_type, now_iso()),
+            """INSERT INTO messages (room_id, sender, content, msg_type, meta, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (int(room_id), sender, content.strip(), msg_type, payload, now_iso()),
         )
         return cur.lastrowid
 
@@ -94,7 +104,7 @@ def get_recent_history(room_id: int, limit: int = 20) -> List[Message]:
     """最近 limit 条，按时间倒序返回（调用方可反转成正序）。"""
     limit = _clamp(limit)
     rows = get_conn().execute(
-        """SELECT id, room_id, sender, content, msg_type, created_at
+        """SELECT id, room_id, sender, content, msg_type, meta, created_at
            FROM messages WHERE room_id = ?
            ORDER BY created_at DESC, id DESC
            LIMIT ?""",
@@ -107,7 +117,7 @@ def get_history_before(room_id: int, before_id: int, limit: int = 20) -> List[Me
     """最近 limit 条中 id 小于 before_id 的部分，按时间倒序返回（用于向上翻页）。"""
     limit = _clamp(limit)
     rows = get_conn().execute(
-        """SELECT id, room_id, sender, content, msg_type, created_at
+        """SELECT id, room_id, sender, content, msg_type, meta, created_at
            FROM messages WHERE room_id = ? AND id < ?
            ORDER BY created_at DESC, id DESC
            LIMIT ?""",
@@ -117,7 +127,7 @@ def get_history_before(room_id: int, before_id: int, limit: int = 20) -> List[Me
 
 
 def search_history(room_id: int, keywords: List[str], limit: int = 20) -> List[Message]:
-    """多关键词 OR 检索，命中数多的排前面。"""
+    """多关键词 OR 检索，命中数多的排前面。撤回的消息不参与检索。"""
     if isinstance(keywords, str):
         keywords = [keywords]
     kws = [k.strip() for k in (keywords or []) if k and k.strip()]
@@ -130,14 +140,141 @@ def search_history(room_id: int, keywords: List[str], limit: int = 20) -> List[M
     rank = " + ".join(["CASE WHEN content LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END"] * len(kws))
 
     rows = get_conn().execute(
-        f"""SELECT id, room_id, sender, content, msg_type, created_at
+        f"""SELECT id, room_id, sender, content, msg_type, meta, created_at
             FROM messages
-            WHERE room_id = ? AND ({where})
+            WHERE room_id = ? AND msg_type <> 'recalled' AND ({where})
             ORDER BY ({rank}) DESC, created_at DESC
             LIMIT ?""",
         [int(room_id)] + like_params + like_params + [limit],
     ).fetchall()
     return [row_to_message(r) for r in rows]
+
+
+def mute_user(user_id: str, until_at: str, by_user: str, reason: str = "") -> None:
+    with transaction() as tx:
+        tx.execute(
+            """INSERT INTO mutes (user_id, until_at, by_user, reason, created_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user_id) DO UPDATE
+                 SET until_at = excluded.until_at,
+                     by_user  = excluded.by_user,
+                     reason   = excluded.reason,
+                     created_at = excluded.created_at""",
+            (user_id, until_at, by_user, reason, now_iso()),
+        )
+
+
+def unmute_user(user_id: str) -> bool:
+    with transaction() as tx:
+        cur = tx.execute("DELETE FROM mutes WHERE user_id = ?", (user_id,))
+        return cur.rowcount > 0
+
+
+def active_mutes() -> List[dict]:
+    """还没到期的禁言。过期的顺手清掉，避免越积越多。"""
+    now = now_iso()
+    with transaction() as tx:
+        tx.execute("DELETE FROM mutes WHERE until_at <= ?", (now,))
+        rows = tx.execute(
+            "SELECT user_id, until_at, by_user, reason FROM mutes ORDER BY until_at"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def active_mute(user_id: str) -> Optional[dict]:
+    row = get_conn().execute(
+        "SELECT user_id, until_at, by_user, reason FROM mutes WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    return dict(row) if row["until_at"] > now_iso() else None
+
+
+def get_message(msg_id: int) -> Optional[dict]:
+    row = get_conn().execute(
+        """SELECT id, room_id, sender, content, msg_type, meta, created_at
+           FROM messages WHERE id = ?""",
+        (int(msg_id),),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def recall_message(msg_id: int, sender: str) -> bool:
+    """撤回：只把自己发的消息内容清空并改类型，保留行以便两端同时删除。"""
+    with transaction() as tx:
+        cur = tx.execute(
+            """UPDATE messages SET content = '', msg_type = 'recalled'
+               WHERE id = ? AND sender = ? AND msg_type <> 'recalled'""",
+            (int(msg_id), sender),
+        )
+        return cur.rowcount > 0
+
+
+def mark_read(room_id: int, user_id: str, upto_id: Optional[int] = None) -> int:
+    """把"我读到哪"往前推。只前进不后退，避免乱序请求把水位拉回去。"""
+    room_id = _require_room(room_id)
+    if upto_id is None:
+        row = get_conn().execute(
+            "SELECT COALESCE(MAX(id), 0) AS m FROM messages WHERE room_id = ?", (room_id,)
+        ).fetchone()
+        upto_id = row["m"] if row else 0
+    upto_id = max(0, int(upto_id))
+    with transaction() as tx:
+        tx.execute(
+            """INSERT INTO room_reads (room_id, user_id, last_read_id, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(room_id, user_id) DO UPDATE
+                 SET last_read_id = MAX(last_read_id, excluded.last_read_id),
+                     updated_at   = excluded.updated_at""",
+            (room_id, user_id, upto_id, now_iso()),
+        )
+    return upto_id
+
+
+def rooms_for_user(user_id: str) -> List[sqlite3.Row]:
+    """我在哪些房间里：主群 + 我自己的 Agent 房间 + 我参与的私聊。"""
+    return get_conn().execute(
+        """SELECT r.room_id, r.name, r.room_type
+           FROM rooms r JOIN room_members m ON m.room_id = r.room_id
+           WHERE m.user_id = ?
+           ORDER BY r.room_id""",
+        (user_id,),
+    ).fetchall()
+
+
+def unread_items(user_id: str) -> List[dict]:
+    """每个房间"上次读过之后、别人发的"有多少条。"""
+    rows = get_conn().execute(
+        """SELECT r.room_id, r.name, r.room_type,
+                  COALESCE(rr.last_read_id, 0) AS last_read_id,
+                  (SELECT COUNT(*) FROM messages m
+                    WHERE m.room_id = r.room_id
+                      AND m.id > COALESCE(rr.last_read_id, 0)
+                      AND m.sender <> ?) AS unread,
+                  (SELECT COUNT(*) FROM messages m3
+                    WHERE m3.room_id = r.room_id
+                      AND m3.id > COALESCE(rr.last_read_id, 0)
+                      AND m3.sender <> ?
+                      AND instr(m3.content, '@' || ?) > 0) AS mentions,
+                  (SELECT COALESCE(MAX(id), 0) FROM messages m2 WHERE m2.room_id = r.room_id) AS max_id
+           FROM rooms r
+           JOIN room_members m ON m.room_id = r.room_id AND m.user_id = ?
+           LEFT JOIN room_reads rr ON rr.room_id = r.room_id AND rr.user_id = ?
+           ORDER BY r.room_id""",
+        (user_id, user_id, user_id, user_id, user_id),
+    ).fetchall()
+    return [
+        {
+            "room": row["name"],
+            "room_id": row["room_id"],
+            "unread": row["unread"],
+            "mentions": row["mentions"],
+            "last_read_id": row["last_read_id"],
+            "max_id": row["max_id"],
+        }
+        for row in rows
+        if row["unread"] > 0
+    ]
 
 
 def count_messages(room_id: int) -> int:

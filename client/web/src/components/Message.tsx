@@ -28,7 +28,7 @@ function StepRow({ step, index }: { step: ToolStep; index: number }) {
   );
 }
 
-function AgentCard({ event }: { event: ChatEvent }) {
+function AgentCard({ event, me }: { event: ChatEvent; me: string | null }) {
   const pending = event.status === 'pending';
   const steps = event.steps ?? [];
   const known = event.steps !== undefined;
@@ -62,14 +62,72 @@ function AgentCard({ event }: { event: ChatEvent }) {
       )}
       {!pending && (
         <div className="agent-out">
-          <RichText text={event.text} />
+          <RichText text={event.text} me={me} />
         </div>
       )}
     </div>
   );
 }
 
-function Body({ event, imageBase }: { event: ChatEvent; imageBase: string }) {
+const KIB = 1024;
+
+function humanSize(bytes: number): string {
+  if (!bytes) return '';
+  if (bytes < KIB) return `${bytes} B`;
+  if (bytes < KIB * KIB) return `${(bytes / KIB).toFixed(0)} KB`;
+  return `${(bytes / KIB / KIB).toFixed(1)} MB`;
+}
+
+const EXT_ICON: Record<string, string> = {
+  '.pdf': 'PDF',
+  '.zip': 'ZIP',
+  '.doc': 'DOC',
+  '.docx': 'DOC',
+  '.xls': 'XLS',
+  '.xlsx': 'XLS',
+  '.ppt': 'PPT',
+  '.pptx': 'PPT',
+  '.mp3': 'AUD',
+  '.wav': 'AUD',
+  '.mp4': 'VID',
+};
+
+function fileBadge(name: string): string {
+  const dot = name.lastIndexOf('.');
+  const ext = dot >= 0 ? name.slice(dot).toLowerCase() : '';
+  return EXT_ICON[ext] ?? (ext ? ext.slice(1, 4).toUpperCase() : 'FILE');
+}
+
+function FileCard({
+  attachment,
+  imageBase,
+}: {
+  attachment: NonNullable<ChatEvent['attachment']>;
+  imageBase: string;
+}) {
+  const href = `${imageBase}/file/${attachment.ref}`;
+  return (
+    <a className="filecard" href={href} target="_blank" rel="noreferrer" download={attachment.name}>
+      <span className="filecard-ico">{fileBadge(attachment.name)}</span>
+      <span className="filecard-main">
+        <span className="filecard-name">{attachment.name}</span>
+        <span className="filecard-meta">
+          {humanSize(attachment.size) || '点击下载'}
+        </span>
+      </span>
+    </a>
+  );
+}
+
+function Body({
+  event,
+  imageBase,
+  me,
+}: {
+  event: ChatEvent;
+  imageBase: string;
+  me: string | null;
+}) {
   if (event.image) {
     return (
       <figure className="pic">
@@ -82,26 +140,33 @@ function Body({ event, imageBase }: { event: ChatEvent; imageBase: string }) {
       </figure>
     );
   }
+  if (event.attachment) {
+    return <FileCard attachment={event.attachment} imageBase={imageBase} />;
+  }
   if (isEmojiOnly(event.text)) {
     return <div className="body big-emoji">{event.text.trim()}</div>;
   }
   return (
     <div className="body">
-      <RichText text={event.text} />
+      <RichText text={event.text} me={me} />
     </div>
   );
 }
+
+const RECALL_WINDOW = 120_000;
 
 export function Message({
   event,
   cont,
   me,
   imageBase,
+  onRecall,
 }: {
   event: ChatEvent;
   cont: ChatEvent[];
   me: string | null;
   imageBase: string;
+  onRecall: (id: number) => void;
 }) {
   const agent = event.kind === 'agent';
   const mine = !agent && event.sender === me;
@@ -127,6 +192,16 @@ export function Message({
           {agent && event.scheduled && <span className="tag">定时总结</span>}
           {event.kind === 'private' && <span className="tag">私聊</span>}
           {mine && <span className="tag">我</span>}
+          {mine && typeof event.id === 'number' && Date.now() - event.stamp < RECALL_WINDOW && (
+            <button
+              type="button"
+              className="recall"
+              title="撤回这条消息（2 分钟内）"
+              onClick={() => onRecall(event.id!)}
+            >
+              撤回
+            </button>
+          )}
           {event.agentScope && (
             <span className="tag soft">
               (Agent {event.agentScope === 'group' ? '群内公开' : '只回我'})
@@ -138,9 +213,9 @@ export function Message({
         </header>
 
         {agent ? (
-          <AgentCard event={event} />
+          <AgentCard event={event} me={me} />
         ) : (
-          <Body event={event} imageBase={imageBase} />
+          <Body event={event} imageBase={imageBase} me={me} />
         )}
 
         {cont.map((item, i) => {
@@ -148,7 +223,7 @@ export function Message({
           const repeat = (i > 0 ? cont[i - 1].time : event.time) === item.time;
           return (
             <div className="cont" key={item.key}>
-              <Body event={item} imageBase={imageBase} />
+              <Body event={item} imageBase={imageBase} me={me} />
               <time className="tm" title={stampTitle(item)} data-repeat={repeat || undefined}>
                 {repeat ? '' : item.time}
               </time>

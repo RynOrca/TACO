@@ -4,26 +4,33 @@ const MAX_EDGE = 1280;
 const JPEG_QUALITY = 0.82;
 const MAX_RAW_GIF = 2 * 1024 * 1024;
 
-export interface UploadedImage {
+export interface UploadedAttachment {
   file: string;
+  name: string;
+  kind: 'image' | 'file';
   url: string;
   bytes: number;
   mime: string;
 }
 
-export async function uploadImage(file: File, imageBase: string): Promise<UploadedImage> {
-  if (!imageBase) throw new Error('图片服务地址还没就绪（桥没握手成功）');
-  const blob = await shrink(file);
-  const res = await fetch(`${imageBase}/upload`, {
-    method: 'POST',
-    headers: { 'Content-Type': blob.type },
-    body: blob,
-  });
+/** 与上传统一入口：图片先压缩，其它文件原样上传（普通文件不动，免得压坏） */
+export async function uploadAttachment(
+  file: File,
+  imageBase: string,
+): Promise<UploadedAttachment> {
+  if (!imageBase) throw new Error('附件服务地址还没就绪（桥没握手成功）');
+  const isImage = file.type.startsWith('image/');
+  const blob = isImage ? await shrink(file) : file;
+  const headers: Record<string, string> = { 'Content-Type': blob.type || 'application/octet-stream' };
+  // 图片走 Content-Type 判定，其它文件靠 X-Filename 认后缀和原名
+  if (!isImage) headers['X-Filename'] = encodeURIComponent(file.name);
+
+  const res = await fetch(`${imageBase}/upload`, { method: 'POST', headers, body: blob });
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
     throw new Error(`服务端拒绝（${res.status}）${detail.slice(0, 120)}`);
   }
-  const payload = (await res.json()) as UploadedImage;
+  const payload = (await res.json()) as UploadedAttachment;
   if (!payload?.file) throw new Error('服务端没有返回文件名');
   return payload;
 }

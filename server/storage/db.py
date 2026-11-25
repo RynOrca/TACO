@@ -4,6 +4,7 @@
 # 对数据库做出INSERT/UPDATE/DELETE等修改时，一定要跟着.commit()!!
 # 不然不会对数据库进行更新！
 
+import json
 import sqlite3
 import threading
 from pathlib import Path
@@ -47,12 +48,30 @@ CREATE TABLE IF NOT EXISTS messages (
     sender     TEXT NOT NULL,
     content    TEXT NOT NULL,
     msg_type   TEXT NOT NULL DEFAULT 'group',
+    meta       TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE
 );
 --- 由于要经常排序，先建立索引
 CREATE INDEX IF NOT EXISTS idx_msg_room_time ON messages(room_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_msg_sender    ON messages(sender);
+
+CREATE TABLE IF NOT EXISTS mutes (
+    user_id    TEXT PRIMARY KEY,
+    until_at   TEXT NOT NULL,
+    by_user    TEXT,
+    reason     TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS room_reads (
+    room_id      INTEGER NOT NULL,
+    user_id      TEXT NOT NULL,
+    last_read_id INTEGER NOT NULL DEFAULT 0,
+    updated_at   TEXT NOT NULL,
+    PRIMARY KEY (room_id, user_id),
+    FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS todos (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,6 +126,12 @@ def init_db() -> str:
         parent.mkdir(parents=True, exist_ok=True)
     conn = get_conn()
     conn.executescript(SCHEMA)
+    # 老库补列：SCHEMA 里的 CREATE TABLE IF NOT EXISTS 不会给已有表加字段
+    for table, column, decl in (("messages", "meta", "TEXT"),):
+        cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+            print(f"[db] 已为 {table} 补上 {column} 列")
     conn.commit()
     return DB_PATH
 
@@ -143,6 +168,16 @@ def parse_ts(value:Optional[str]) -> Optional[datetime]:
 def row_to_message(row:sqlite3.Row):
     """sqlite3.Row 转换成 models.Message 格式"""
     from server.models import Message
+    meta = None
+    try:
+        raw = row["meta"]
+    except (IndexError, KeyError):
+        raw = None
+    if raw:
+        try:
+            meta = json.loads(raw)
+        except (TypeError, ValueError):
+            meta = None
     return Message(
         id = row['id'],
         room_id = row['room_id'],
@@ -150,6 +185,7 @@ def row_to_message(row:sqlite3.Row):
         content = row['content'],
         msg_type = row['msg_type'],
         timestamp = parse_ts(row["created_at"]),
+        meta = meta,
     )
 
 if __name__ == '__main__':

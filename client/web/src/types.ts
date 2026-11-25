@@ -39,6 +39,20 @@ export interface ServerMsg {
   seconds?: number;
   /* 桥握手：图片服务地址 */
   image_base?: string;
+  /** pong 回显的发起时间戳（ms），用于算 RTT */
+  t?: number;
+  /** unread 回执：每个会话离线期间攒了多少条、上次读到哪（与 todos 的 items 共用字段） */
+  unread_items?: UnreadItem[];
+  /** recall 撤回：id 指向被撤回的那条消息 */
+  room_id?: number;
+  /** group 消息里的 @提及（只含真实存在的用户名） */
+  mentions?: string[];
+  /** muted 回执：当前被禁言的人和到期时间（与 userlist 的 users 共用字段，类型按 type 区分） */
+  mutes?: MuteInfo[];
+  /** 附件消息：文件名（附件服务上的存储名） */
+  file?: string;
+  /** 附件附加信息 */
+  meta?: AttachmentMeta | null;
   /* 井字棋结构化状态 */
   action?: string;
   board?: string[];
@@ -49,6 +63,7 @@ export interface ServerMsg {
 }
 
 export interface HistoryItem {
+  meta?: AttachmentMeta | null;
   id: number;
   sender: string;
   content: string;
@@ -74,17 +89,38 @@ export interface GameState {
 
 export type SendMsg =
   | { type: 'login' | 'register'; user_id: string; password: string }
-  | { type: 'group'; msg: string; image?: string }
-  | { type: 'private'; target: string; msg: string; image?: string }
+  | {
+      type: 'group';
+      msg: string;
+      image?: string;
+      file?: string;
+      name?: string;
+      size?: number;
+      mime?: string;
+    }
+  | {
+      type: 'private';
+      target: string;
+      msg: string;
+      image?: string;
+      file?: string;
+      name?: string;
+      size?: number;
+      mime?: string;
+    }
   | { type: 'agent'; msg: string; scope: 'private' | 'group'; include_private?: boolean }
   | { type: 'history'; limit?: number; before_id?: number; target?: string; agent?: boolean }
   | { type: 'todos' }
+  | { type: 'ping'; t: number }
+  | { type: 'read'; id?: number; target?: string; agent?: boolean }
+  | { type: 'recall'; id: number }
+  | { type: 'mute'; action: 'mute' | 'unmute' | 'list'; target?: string; minutes?: number }
   | { type: 'autosummary'; action: 'status' | 'on' | 'off' | 'now'; minutes?: number }
   | { type: 'task'; text: string }
   | { type: 'game'; text: string }
   | { type: 'reconnect' };
 
-export type EventKind = 'group' | 'private' | 'agent' | 'ask' | 'system' | 'error';
+export type EventKind = 'group' | 'private' | 'agent' | 'ask' | 'recall' | 'system' | 'error';
 
 /** 一条渲染单元：聊天记录、系统提示或错误提示 */
 export interface ChatEvent {
@@ -106,6 +142,34 @@ export interface ChatEvent {
   scheduled?: boolean;
   /** 这条是自己发给 Agent 的提问，界面上加一条灰色备注 */
   agentScope?: 'private' | 'group';
+  /** 这条消息 @了谁 */
+  mentions?: string[];
+  /** 附件（图片或文件）的存储名 + 原名/大小 */
+  attachment?: { ref: string; kind: 'image' | 'file'; name: string; size: number; mime?: string };
+}
+
+export interface AttachmentMeta {
+  name?: string;
+  size?: number;
+  mime?: string;
+}
+
+export interface MuteInfo {
+  user_id: string;
+  until_at: string;
+  by_user?: string | null;
+  reason?: string | null;
+}
+
+export interface UnreadItem {
+  /** 其中有多少条 @了我 */
+  mentions?: number;
+  /** 房间名：main / agent:alice / pm:a:b */
+  room: string;
+  room_id: number;
+  unread: number;
+  last_read_id: number;
+  max_id: number;
 }
 
 export interface ThreadState {
@@ -116,6 +180,10 @@ export interface ThreadState {
   more: boolean;
   loading: boolean;
   unread: number;
+  /** 未读里有没有 @我：徽标显示成 @ 而不是数字 */
+  mentioned: boolean;
+  /** 离线未读：登录时服务端告诉我"上次读到 id"，历史里在这之后插一条分界线 */
+  offline?: { count: number; sinceId: number; mentions?: number };
 }
 
 export const MAIN = 'main';
