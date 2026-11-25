@@ -18,6 +18,12 @@
 | 私聊隔离 | 私聊只存 `pm:a:b` 房间、只在两人之间单播；Agent 的工具被钉死在群聊房间，读不到任何私聊内容，私聊提问的回答也不落群聊历史 |
 | 历史消息 | 全部落 SQLite，按房间+时间建索引；客户端首屏只拉**最近 20 条**，滚到顶部再按 `before_id` 向前翻页，每次 20 条 |
 | 在线列表 | 用户上下线时向所有人推送 `userlist`，客户端实时渲染成员面板 |
+| 网络延迟监测 | 每 5 秒一次 ping/pong 算往返时间，右栏「会话」显示 `rtt`，>200ms 标黄、超时标红 |
+| 离线消息提醒 | `room_reads` 记住每个会话读到哪；再次登录时侧栏显示未读数，历史里用虚线圈出「离线期间 N 条新消息」 |
+| 消息撤回 | 自己 2 分钟内的消息可撤回，两端同步替换成「xxx 撤回了一条消息」；撤回内容不再进入 Agent 的视野 |
+| @提及 | 消息里的 `@用户名` 高亮（@自己用荧光色），输入框打 `@` 弹出成员补全，被 @ 的人侧栏徽标变成荧光 `@` |
+| 禁言 | 管理员 `/mute 用户名 分钟`，被禁言者发群聊/私聊/问 Agent 都被拦下并提示剩余时间；成员面板与右栏同步标记 |
+| 通用附件 | 图片 + pdf/zip/文档/源码/音视频，走内置 HTTP 服务；聊天消息只传文件名，原名和大小存 `messages.meta` |
 | 图形界面 | Vite + React 前端（铅印风格三栏），经 Python 桥接层走原生 TCP；支持登录/注册、群聊、私聊、成员、待办、Agent 卡片、向上翻页加载更早消息 |
 
 ## 房间模型：到底有几个"聊天室"
@@ -304,6 +310,9 @@ python -m client.socket_client
 | `CHAT_IMAGE_DIR` | 否 | `<数据库目录>/images` | 图片落盘目录 |
 | `CHAT_IMAGE_MAX_BYTES` | 否 | `8388608` | 单张图片字节上限，超出直接 413 |
 | `AGENT_AUTO_SUMMARY_SECONDS` | 否 | `0` | 服务端启动时的定时总结间隔（秒）。`0` = 关闭，客户端可用 `/auto 5` 临时开启 |
+| `CHAT_FILE_MAX_BYTES` | 否 | `20971520` | 通用附件单文件上限（20 MB） |
+| `CHAT_FILE_EXTS` | 否 | 见 `.env.example` | 允许的附件后缀白名单（pdf/zip/文档/源码/音视频…） |
+| `ADMIN_USERS` | 否 | 空 | 能禁言/解禁的人，逗号分隔。留空则没人有权限 |
 | `AGENT_AUTO_SUMMARY_MIN_MESSAGES` | 否 | `3` | 自动总结的门槛：至少积累这么多条**人发的新消息**才总结；手动触发不受限制 |
 | `LLM_API_KEY` | 否 | 空 | OpenAI 兼容接口的 Key。**留空也能启动**：聊天室收发完全正常，Agent 回复一句「暂不可用」（课设要求「模型不可用时聊天室基本通信仍正常」） |
 | `LLM_BASE_URL` | 否 | OpenAI 官方 | 第三方兼容接口填完整地址（一般带 `/v1`）。用官方接口请把整行**注释掉**，写成空值会导致每次请求 `APIConnectionError` |
@@ -347,15 +356,21 @@ python -m client.socket_client
 | `agent` | C→S | `msg`, `scope`(`private`/`group`), `include_private` | `ChatService.handle_agent`。`include_private=true` 表示本轮允许 Agent 读"我和 Agent 的私聊" |
 | `todos` | C→S | — | `ChatService.handle_todos` |
 | `autosummary` | C→S | `action`(`status`/`on`/`off`/`now`), `minutes` | `ChatService.handle_auto_summary` |
+| `read` | C→S | `id`（我看到的最后一条）, 可选 `target`/`agent` | `ChatService.handle_read` 推进已读水位 |
+| `recall` | C→S | `id` | `ChatService.handle_recall`（2 分钟内、只能撤自己的） |
+| `mute` | C→S | `action`(`mute`/`unmute`/`list`), `target`, `minutes` | `ChatService.handle_mute`（仅 `ADMIN_USERS`） |
 | `history` | C→S | 可选 `target`、`agent`、`limit`、`before_id` | `ChatService.handle_history`。不填 `target` 读当前群聊，填了读「我」与该用户的私聊房间（房间名由服务端按 `pm:me:target` 算，客户端无法指定 room_id）；带 `before_id` 时取更早的一页；`agent=true` 读"我和 Agent 的私聊" |
-| `ping` | C→S | — | 回 `pong` |
+| `ping` | C→S | `t`（发起时刻 ms） | 回 `pong` 并原样带回 `t`，客户端据此算 RTT |
 | `system` | S→C | `msg` | 回执/系统提示 |
-| `group` / `private` | S→C | `sender`, `msg`, (`id`, `target`), (`msg_type`, `image`) | 广播/单播。`private` 会同时回显给发送方（带 `target`），这样自己的私聊会话里也能看到刚发出去的那条。图片消息带 `msg_type="image"` 和文件名 `image` |
+| `group` / `private` | S→C | `sender`, `msg`, (`id`, `target`), (`msg_type`, `image`/`file`, `meta`, `mentions`) | 广播/单播。`private` 会同时回显给发送方（带 `target`），这样自己的私聊会话里也能看到刚发出去的那条。图片消息带 `msg_type="image"` 和文件名 `image` |
 | `agent` | S→C | `sender`, `msg`, `status`(`pending`/`done`), `scope`, `thread`, `steps`, (`scheduled`) | Agent 先推「正在思考」，再推结果。`thread` 告诉客户端这条该落在 `main` 还是 `agent` 会话；`steps` 是本轮真实工具调用记录（`name`/`args`/`ok`/`ms`/`preview`），`scheduled=true` 表示定时总结 |
 | `agent_ask` | S→C | `sender`, `msg`, `scope`, `id` | 只发给提问者：私下问 Agent 的提问回执（落在「Agent」会话里） |
 | `autosummary` | S→C | `enabled`, `seconds` | 定时总结状态变化时广播给所有人 |
 | `userlist` | S→C | `users` | 在线用户列表 |
 | `todos` | S→C | `items` | 当前房间待办（`id/assignee/content/status/created_at/done_at`） |
+| `unread` | S→C | `unread_items` | 登录时下发：每个会话离线期间的未读条数、其中多少条 @我、上次读到的 id |
+| `recall` | S→C | `id`, `sender`, `room_id` | 撤回通知，按房间类型广播/单播 |
+| `muted` | S→C | `mutes` | 当前禁言名单（`user_id`/`until_at`/`by_user`） |
 | `history` | S→C | `items`, `target`, `before_id`, `more` | 历史消息（`id/sender/content/msg_type/created_at`），按时间正序；`more=false` 表示没有更早的了 |
 | `error` | S→C | `code`, `msg` | 错误码：`NOT_LOGIN` `BAD_FORMAT` `BAD_TYPE` `UNKNOWN_TYPE` `INTERNAL` `BAD_LOGIN` `LOGIN_FAILED` `EMPTY_MSG` `MSG_TOO_LONG` `SAVE_FAILED` `BAD_PARAM` `SELF_PM` `USER_OFFLINE` `BAD_REGISTER` `USER_EXISTS` `NOT_REGISTERED` `BAD_PASSWORD` |
 
@@ -386,7 +401,9 @@ SQLite，WAL 模式 + 每线程一个连接（`threading.local`）+ `busy_timeou
 | `rooms` | `room_id`(PK), `name`(UNIQUE), `room_type`, `owner_id`, `created_at` | 群聊用 `main`，私聊用 `pm:用户A:用户B`（字典序保证双向一致） |
 | `users` | `user_id`(PK), `nickname`, `password_hash`, `status`, `last_login` | `password_hash` 存 `pbkdf2_sha256$轮数$盐$哈希`，注册时写入、登录时用 `hmac.compare_digest` 校验 |
 | `room_members` | (`room_id`, `user_id`)(PK), `joined_at` | 成员关系，外键级联删除 |
-| `messages` | `id`(PK), `room_id`, `sender`, `content`, `msg_type`, `created_at` | `msg_type`：`group` / `private` / `image` / `agent` / `summary`；`image` 行的 `content` 就是图片文件名（文件本体在 `database/images/`，不进库）；索引 `(room_id, created_at)`、`(sender)` |
+| `messages` | `id`(PK), `room_id`, `sender`, `content`, `msg_type`, `meta`, `created_at` | `msg_type`：`group` / `private` / `image` / `file` / `agent` / `agent_ask_group` / `agent_ask_private` / `recalled` / `summary`；`meta` 是附件消息的 JSON（原名/大小/类型），老库启动时自动 `ALTER TABLE` 补列；`image` 行的 `content` 就是图片文件名（文件本体在 `database/images/`，不进库）；索引 `(room_id, created_at)`、`(sender)` |
+| `room_reads` | (`room_id`,`user_id`)(PK), `last_read_id`, `updated_at` | 已读水位，只前进不后退；登录时据此算离线未读 |
+| `mutes` | `user_id`(PK), `until_at`, `by_user`, `reason`, `created_at` | 禁言；查询时顺手清掉过期记录 |
 | `todos` | `id`(PK), `room_id`, `assignee`, `content`, `status`, `created_at`, `done_at` | `status`：`pending` / `done`；索引 `(room_id, status)` |
 
 DAO 层的几个约定：
@@ -453,11 +470,17 @@ DAO 层的几个约定：
 - 前端消息流是普通 DOM 列表（没有虚拟滚动）：几百条以内很稳，单个会话堆到上千条时首屏渲染会变慢。
 - 聊天室固定一个 `main` 群，没有建群 / 拉人 / 退群；私聊按 `pm:a:b` 自动建房间（见上面「房间模型」）。
 - 终端里的消息日志单行截断到 300 字；GBK 控制台下 emoji 显示为 `?`（用 Windows Terminal / `chcp 65001` 可正常显示）。
-- 图片服务没有做鉴权：局域网内谁都能 `POST /upload`（只限制了类型和 8MB 大小）。课设演示够用，上公网要加 token。
+- 附件服务没有做鉴权：局域网内谁都能 `POST /upload`（只限制了类型和大小）。课设演示够用，上公网要加 token。
+- 禁言需要管理员权限，`ADMIN_USERS` 没配时 `/mute` 会提示 `FORBIDDEN`；判断只在这一层，没有更细的角色体系。
+- 已读水位按"看到最后一条消息的 id"推进，跨设备/多端登录会互相覆盖（同一账号只保留一份水位）。
 - Agent 提问和回答都会落库：群里问的进 `main`，私下问的进 `agent:<我>`（只有本人能读）。历史里的 Agent 卡片不保存 `steps`，会显示"历史记录 · 工具调用细节未保存"。
 - 「包含我与 Agent 的私聊」是一个**会公开**的操作：总结结果发到群里，勾选后私聊里的内容可能被写进群总结。界面上有提示，但仍属于用户的主动选择。
 - 定时总结以"群聊新消息条数"为触发门槛，没有做持久化游标，服务端重启后会把最近 40 条重新算一次（`_summary_cursor` 存在内存里）。
 - 窗口宽度小于 1180px 时右侧栏隐藏，小于 820px 时侧栏也隐藏，只留会话区；高分屏缩放交给浏览器/系统处理。
+
+## 还没做的
+
+`docs/待办-语音消息.md`：语音消息（用户录音 + Agent 语音播报）的可行性评估与落地方案。DeepSeek 2026-11-13 上线了官方 TTS（`POST /v1/tools/tts`，`stella`/`tide` 两个音色，`wav`/`pcm` 两种格式，`filter_markdown` 自动去掉 Markdown 再念），这条链路可行；文档里写了接口细节、计费、失败降级和"只念前 N 字"的取舍。
 
 ## 界面设计与实现
 
