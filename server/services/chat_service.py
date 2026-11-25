@@ -7,19 +7,38 @@ from typing import List, Optional, Tuple
 
 from server import config
 from server.agent import agent_core
-from server.console import log_chat
+from server.console import log_chat, log_line
 from server.models import Message
+from server.services import game_service
 from server.services.context import RequestContext, err
 from server.storage import chat_history
 
 MAX_MSG_LEN = 2000
+# 单页历史最多多少字节。超过就少给几条，避免把整个回包顶到协议单帧上限
+MAX_HISTORY_BYTES = 512 * 1024
+# Agent 回复落库/广播前的最大字节数，超了截断并标注
+MAX_AGENT_REPLY_BYTES = 32 * 1024
 # 图片文件名由图片服务生成：32 位十六进制 + 白名单后缀，客户端改不了路径
 IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{32}\.(?:jpg|jpeg|png|gif|webp)$")
+
+
+def _clamp_reply(text: str) -> str:
+    raw = text.encode("utf-8")
+    if len(raw) <= MAX_AGENT_REPLY_BYTES:
+        return text
+    return raw[:MAX_AGENT_REPLY_BYTES].decode("utf-8", errors="ignore") + "\n…（回复过长，已截断）"
 
 SUMMARY_PROMPT = (
     "请总结本群最近的讨论，面向群里所有人："
     "先给 2-4 条结论或进展，再列出待办（谁负责、做什么），150 字以内。"
     "只依据工具读到的群聊内容，不要编造。"
+)
+
+GAME_HELP = (
+    "井字棋：你和 Agent 对弈，你执 X 先手。\n"
+    "/game start 开一局\n"
+    "/game move 5 把棋子下在第 5 格（1-9 从左到右、从上到下）\n"
+    "/game board 看当前棋盘　/game status 看战绩　/game quit 退出"
 )
 
 
@@ -37,6 +56,8 @@ class ChatService:
         self._agent_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="agent")
         # 定时总结调度器，由 main.py 注入（服务层不自己起线程）
         self.scheduler = None
+        # 井字棋：每个用户一盘，状态只在服务端
+        self.games = game_service.GameService(users)
         self._summary_cursor = 0
         self._cursor_lock = threading.Lock()
 
@@ -220,6 +241,7 @@ class ChatService:
             print(f"[Agent] 调用异常: {e}")
             reply, steps = f"Agent 调用失败：{e}", []
 
+        reply = _clamp_reply(reply)
         payload = {
             "type": "agent", "sender": "Agent", "msg": reply,
             "status": "done", "steps": steps, "scope": scope, "thread": thread,
@@ -238,6 +260,10 @@ class ChatService:
             self.users.send_to(user_id, payload, conn=conn)
 
     # ---------------------------------------------------------------- 定时总结
+    def submit_scheduled_summary(self, triggered_by: str = ""):
+        """给调度器用的异步入口：Agent 调用会阻塞，丢进线程池，不占住调度线程。"""
+        self._agent_pool.submit(self.run_scheduled_summary, triggered_by, False)
+
     def run_scheduled_summary(self, triggered_by: Optional[str] = None,
                               force: bool = False) -> None:
         room_id = self.group_room_id()
@@ -259,6 +285,7 @@ class ChatService:
             print(f"[AutoSummary] 总结失败: {e}")
             return
 
+        reply = _clamp_reply(reply)
         payload = {
             "type": "agent", "sender": "Agent", "msg": reply,
             "status": "done", "steps": steps, "scheduled": True, "scope": "group",
@@ -306,6 +333,197 @@ class ChatService:
         self.users.broadcast({"type": "autosummary", **self.scheduler.status()})
         return {"type": "system", "msg": f"{ctx.user_id} 开启了 Agent 定时总结：每 {minutes} 分钟一次"}
 
+    # ---------------------------------------------------------------- 井字棋
+    def _game_state(self, user_id: str, game) -> dict:
+        """给前端渲染可点击棋盘用的结构化状态（只发给下棋的本人）。"""
+        return {
+            "type": "game",
+            "action": "state",
+            "user": user_id,
+            "board": list(game.board),
+            "turn": game.turn,
+            "over": game.over,
+            "result": game.result,
+            "score": self.games.score(user_id),
+        }
+
+    def _game_status(self, game) -> str:
+        whose = "轮到你（X）" if game.turn == "X" else "Agent 思考中（O）"
+        return f"{game.render()}\n{whose}　{self.games.score_text(game.user_id)}"
+
+    def handle_game(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
+        need = ctx.require_login()
+        if need:
+            return need
+
+        text = (msg.get("text") or "").strip()
+        action, _, rest = text.partition(" ")
+        action = action.strip().lower()
+        rest = rest.strip()
+
+        if not action or action == "help":
+            game = self.games.get(ctx.user_id)
+            if game is None:
+                return {"type": "system", "msg": GAME_HELP}
+            ctx.send(self._game_state(ctx.user_id, game))   # 刷新过页面也能把面板拉回来
+            return {"type": "system", "msg": self._game_status(game)}
+
+        if action == "start":
+            current = self.games.get(ctx.user_id)
+            if current is not None and not current.over:
+                ctx.send(self._game_state(ctx.user_id, current))
+                return {"type": "system",
+                        "msg": "你还有一局没下完：\n" + self._game_status(current)}
+            game = self.games.start(ctx.user_id)
+            self.users.broadcast({"type": "system", "msg": (
+                f"[井字棋] {ctx.user_id} 开局，执 X 先手。\n{game.render()}\n"
+                "输入 /game move 5 落子。")})
+            ctx.send(self._game_state(ctx.user_id, game))
+            return None
+
+        if action == "move":
+            game = self.games.get(ctx.user_id)
+            if game is None:
+                return err("NO_GAME", "还没有对局，先发 /game start")
+            try:
+                cell = int(rest)
+            except (TypeError, ValueError):
+                return err("BAD_MOVE", "用法：/game move 5（1-9）")
+            ok, detail = game.move(cell, "X")
+            if not ok:
+                return err("BAD_MOVE", detail)
+
+            if game.over:
+                self.games.record(game)
+                ctx.send(self._game_state(ctx.user_id, game))
+                self.users.broadcast({"type": "system", "msg": (
+                    f"[井字棋] {ctx.user_id} 下在 {cell}。\n{game.render()}\n"
+                    f"结果：{game_service.RESULT_CN[game.result]}\n"
+                    f"{self.games.score_text(ctx.user_id)}")})
+                self.games.drop(ctx.user_id)
+                return None
+
+            self.users.broadcast({"type": "system", "msg": (
+                f"[井字棋] {ctx.user_id} 下在 {cell}，Agent 思考中…\n{game.render()}")})
+            ctx.send(self._game_state(ctx.user_id, game))
+            self._agent_pool.submit(self._game_agent_task, ctx.user_id, game)
+            return None
+
+        if action == "board":
+            game = self.games.get(ctx.user_id)
+            if game is None:
+                return {"type": "system", "msg": "当前没有进行中的对局。\n" + GAME_HELP}
+            ctx.send(self._game_state(ctx.user_id, game))
+            return {"type": "system", "msg": self._game_status(game)}
+
+        if action == "status":
+            game = self.games.get(ctx.user_id)
+            head = self.games.score_text(ctx.user_id)
+            if game is not None:
+                ctx.send(self._game_state(ctx.user_id, game))
+                return {"type": "system", "msg": head + "\n" + self._game_status(game)}
+            return {"type": "system", "msg": head + "\n当前没有进行中的对局。"}
+
+        if action == "quit":
+            game = self.games.drop(ctx.user_id)
+            if game is None:
+                return {"type": "system", "msg": "当前没有进行中的对局。"}
+            ctx.send({"type": "game", "action": "closed"})
+            return {"type": "system", "msg": (
+                f"{ctx.user_id} 退出了井字棋。{self.games.score_text(ctx.user_id)}")}
+
+        return err("BAD_GAME", "用法：/game start|move 5|board|status|quit")
+
+    def _game_agent_task(self, user_id: str, game) -> None:
+        """Agent 的一轮：读棋盘、用 game_move 落子、点评一句。"""
+        prompt = (
+            f"你在和用户 {user_id} 玩井字棋。你执 O，对方执 X，对方先手。\n"
+            f"当前棋盘（数字是空位）：\n{game.render()}\n"
+            f"可落子位置：{game.legal_moves()}。\n"
+            "规则：必须调用 game_move(cell) 落子，cell 只能从可落子位置里取；"
+            "落子后用一句话点评这步棋，不要输出完整棋谱，也不要替玩家落子。"
+        )
+        spec, tools = game_service.game_tools(game, user_id)
+        try:
+            reply, steps = agent_core.run_detailed(
+                prompt, max_steps=4, room_id=self.group_room_id(),
+                user_id=user_id, extra_tools=(spec, tools))
+        except Exception as e:
+            print(f"[Game] Agent 调用异常: {e}")
+            reply, steps = f"Agent 调用失败：{e}", []
+
+        if game.cancelled:
+            return
+
+        # 模型没落子（或着法非法又没纠正）时，用本地 minimax 兜底，别把棋局卡死
+        fallback = False
+        if not game.over and game.turn == "O":
+            cell = game.auto_move()
+            if cell is not None:
+                fallback = True
+                reply = (reply or "").strip() + f"\n（模型没有给出合法落子，已用本地策略下在 {cell}）"
+
+        text = _clamp_reply((reply or "").strip())
+        if game.over:
+            text += f"\n结果：{game_service.RESULT_CN[game.result]}"
+        text = f"{text}\n\n{game.render()}"
+
+        # 先推结构化状态，让前端棋盘立刻反映出 O 的落子
+        self.users.send_to(user_id, self._game_state(user_id, game))
+
+        payload = {"type": "agent", "sender": "Agent", "msg": text,
+                   "status": "done", "steps": steps, "scope": "group"}
+        try:
+            payload["id"] = chat_history.save_message(
+                self.group_room_id(), "Agent", text, "agent")
+        except Exception as e:
+            print(f"[Game] 落库失败: {e}")
+        self.users.broadcast(payload)
+
+        if game.over:
+            self.games.record(game)
+            self.games.drop(user_id)
+            self.users.broadcast({"type": "system", "msg": (
+                f"[井字棋] 本局结束：{game_service.RESULT_CN[game.result]}　"
+                f"{self.games.score_text(user_id)}")})
+        elif fallback:
+            log_line(f"[Game] {user_id} 的对局由本地策略代打了一步")
+
+    # ---------------------------------------------------------------- 定时任务
+    def handle_task(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
+        need = ctx.require_login()
+        if need:
+            return need
+        if self.scheduler is None:
+            return err("NO_SCHEDULER", "服务端没有启用定时任务调度器")
+
+        text = (msg.get("text") or "").strip()
+        action, _, rest = text.partition(" ")
+        action = action.strip().lower() or "list"
+        rest = rest.strip()
+
+        if action == "list":
+            return {"type": "system", "msg": self.scheduler.describe_all()}
+
+        if action == "add":
+            ok, out = self.scheduler.add_from_text(rest, ctx.user_id, ctx.room_id)
+            return {"type": "system", "msg": out} if ok else err("BAD_TASK", out)
+
+        if action in ("del", "on", "off"):
+            try:
+                task_id = int(rest)
+            except (TypeError, ValueError):
+                return err("BAD_PARAM", "用法：/task del|on|off <任务编号>")
+            if action == "del":
+                ok, out = self.scheduler.remove(task_id)
+            else:
+                ok, out = self.scheduler.set_enabled(task_id, action == "on")
+            return {"type": "system", "msg": out} if ok else err("BAD_TASK", out)
+
+        return err("BAD_PARAM",
+                   "用法：/task list、/task add summary every:10、"
+                   "/task add reminder in:5 开会、/task del|on|off <编号>")
+
     # ---------------------------------------------------------------- 历史/待办
     def handle_history(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
         need = ctx.require_login()
@@ -331,6 +549,20 @@ class ChatService:
         else:
             rows = chat_history.get_recent_history(room_id, limit)
         rows = list(rows)
+
+        # 按字节数收缩这一页：长消息太多时不硬塞进一帧，宁可少给几条让客户端继续翻页
+        trimmed = False
+        kept: List[Message] = []
+        total = 0
+        for m in rows:                      # rows 是从新到旧
+            size = len(m.content.encode("utf-8")) + 120
+            if kept and total + size > MAX_HISTORY_BYTES:
+                trimmed = True
+                break
+            kept.append(m)
+            total += size
+        rows = kept
+
         items = [
             {
                 "id": m.id,
@@ -343,7 +575,8 @@ class ChatService:
         ]
         return {"type": "history", "target": target or None, "items": items,
                 "agent": bool(msg.get("agent")),
-                "before_id": before_id, "more": len(rows) >= chat_history._clamp(limit)}
+                "before_id": before_id,
+                "more": trimmed or len(rows) >= chat_history._clamp(limit)}
 
     def handle_todos(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
         need = ctx.require_login()

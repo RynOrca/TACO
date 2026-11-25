@@ -16,6 +16,9 @@ export interface Chat {
   askAgent: (question: string, scope: 'private' | 'group') => void;
   sendImage: (file: File) => Promise<void>;
   autoSummary: (action: 'status' | 'on' | 'off' | 'now', minutes?: number) => void;
+  gameMove: (cell: number) => void;
+  gameStart: () => void;
+  gameQuit: () => void;
   setIncludePrivate: (value: boolean) => void;
   setHelp: (open: boolean) => void;
   submitAuth: (kind: 'login' | 'register', user: string, password: string) => void;
@@ -164,6 +167,14 @@ export function useChat(): Chat {
           send({ type: 'private', target, msg: msg.join(' ') });
           return;
         }
+        if (cmd === '/game') {
+          send({ type: 'game', text: body });
+          return;
+        }
+        if (cmd === '/task') {
+          send({ type: 'task', text: body });
+          return;
+        }
         if (cmd === '/auto') {
           const arg = (rest[0] || '').toLowerCase();
           if (!arg) send({ type: 'autosummary', action: 'status' });
@@ -228,8 +239,24 @@ export function useChat(): Chat {
     [send],
   );
 
-  const setHelp = useCallback((open: boolean) => dispatch({ type: 'help', open }), []);
+  const gameMove = useCallback(
+    (cell: number) => {
+      if (!send({ type: 'game', text: `move ${cell}` })) {
+        dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，落子没有发出去' });
+      }
+    },
+    [send],
+  );
+  const gameStart = useCallback(() => {
+    if (!send({ type: 'game', text: 'start' })) {
+      dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，开局指令没有发出去' });
+    }
+  }, [send]);
+  const gameQuit = useCallback(() => {
+    send({ type: 'game', text: 'quit' });
+  }, [send]);
 
+  const setHelp = useCallback((open: boolean) => dispatch({ type: 'help', open }), []);
   const setIncludePrivate = useCallback(
     (value: boolean) => dispatch({ type: 'include-private', value }),
     [],
@@ -273,6 +300,9 @@ export function useChat(): Chat {
     askAgent,
     sendImage,
     autoSummary,
+    gameMove,
+    gameStart,
+    gameQuit,
     setIncludePrivate,
     setHelp,
     submitAuth,

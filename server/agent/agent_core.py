@@ -110,8 +110,13 @@ def run_detailed(
     user_id: Optional[str] = None,
     history: Optional[List[dict]] = None,
     agent_room_id: Optional[int] = None,
+    extra_tools: Optional[Tuple[List[dict], Dict[str, Callable]]] = None,
 ) -> Tuple[str, List[dict]]:
-    """跑一轮 Agent，返回（最终回复, 工具调用记录）。工具记录用于界面展示「真实调用」。"""
+    """跑一轮 Agent，返回（最终回复, 工具调用记录）。工具记录用于界面展示「真实调用」。
+
+    extra_tools 用来挂载本轮专属工具（例如井字棋的 game_move），
+    由调用方用闭包把状态绑好，模型只拿到函数名和参数说明。
+    """
     if not user_input or not user_input.strip():
         return "消息为空，无法处理", []
 
@@ -119,6 +124,10 @@ def run_detailed(
         spec, tools_map = build_room_tools(room_id, user_id, agent_room_id)
     else:
         spec, tools_map = TOOLS_SPEC, agent_tools.TOOLS
+    if extra_tools:
+        extra_spec, extra_map = extra_tools
+        spec = list(spec) + list(extra_spec)
+        tools_map = {**tools_map, **extra_map}
 
     env = [
         f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",

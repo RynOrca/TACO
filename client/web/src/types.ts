@@ -39,6 +39,13 @@ export interface ServerMsg {
   seconds?: number;
   /* 桥握手：图片服务地址 */
   image_base?: string;
+  /* 井字棋结构化状态 */
+  action?: string;
+  board?: string[];
+  turn?: 'X' | 'O';
+  over?: boolean;
+  result?: string;
+  score?: { win: number; lose: number; draw: number };
 }
 
 export interface HistoryItem {
@@ -56,6 +63,15 @@ export interface TodoItem {
   assignee?: string | null;
 }
 
+/** 井字棋面板状态（只发给下棋的本人） */
+export interface GameState {
+  board: string[];               // 9 格：" " / "X" / "O"
+  turn: 'X' | 'O';
+  over: boolean;
+  result: '' | 'win' | 'lose' | 'draw';
+  score: { win: number; lose: number; draw: number };
+}
+
 export type SendMsg =
   | { type: 'login' | 'register'; user_id: string; password: string }
   | { type: 'group'; msg: string; image?: string }
@@ -64,6 +80,8 @@ export type SendMsg =
   | { type: 'history'; limit?: number; before_id?: number; target?: string; agent?: boolean }
   | { type: 'todos' }
   | { type: 'autosummary'; action: 'status' | 'on' | 'off' | 'now'; minutes?: number }
+  | { type: 'task'; text: string }
+  | { type: 'game'; text: string }
   | { type: 'reconnect' };
 
 export type EventKind = 'group' | 'private' | 'agent' | 'ask' | 'system' | 'error';

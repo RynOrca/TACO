@@ -65,6 +65,22 @@ CREATE TABLE IF NOT EXISTS todos (
     FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_todo_room_status ON todos(room_id, status);
+
+-- 定时任务：summary（让 Agent 总结）/ reminder（到点广播一句话）
+-- interval_seconds > 0 表示周期任务；= 0 表示一次性任务（跑完自动关闭）
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind             TEXT NOT NULL,
+    payload          TEXT NOT NULL DEFAULT '',
+    interval_seconds INTEGER NOT NULL DEFAULT 0,
+    next_run         TEXT NOT NULL,
+    last_run         TEXT,
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    created_by       TEXT,
+    created_at       TEXT NOT NULL,
+    room_id          INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_task_next ON scheduled_tasks(enabled, next_run);
 """
 
 def _connect() -> sqlite3.Connection:
