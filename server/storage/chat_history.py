@@ -235,6 +235,71 @@ def join_room(room_id: int, user_id: str) -> bool:
         )
         return cur.rowcount > 0
 
+
+
+# ---------------------------------------------------------------- 定时任务
+TASK_FIELDS = ("kind", "payload", "interval_seconds", "next_run",
+               "last_run", "enabled", "room_id")
+
+
+def create_task(kind: str, next_run: str, payload: str = "",
+                interval_seconds: int = 0, created_by: str = "",
+                room_id: Optional[int] = None) -> int:
+    with transaction() as tx:
+        cur = tx.execute(
+            """INSERT INTO scheduled_tasks
+               (kind, payload, interval_seconds, next_run, enabled, created_by, created_at, room_id)
+               VALUES (?, ?, ?, ?, 1, ?, ?, ?)""",
+            (kind, payload, int(interval_seconds), next_run, created_by, now_iso(),
+             int(room_id) if room_id is not None else None),
+        )
+        return cur.lastrowid
+
+
+def get_task(task_id: int) -> Optional[dict]:
+    row = get_conn().execute(
+        "SELECT * FROM scheduled_tasks WHERE id = ?", (int(task_id),)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def list_tasks() -> List[dict]:
+    rows = get_conn().execute(
+        "SELECT * FROM scheduled_tasks ORDER BY id"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def due_tasks(now: str) -> List[dict]:
+    rows = get_conn().execute(
+        """SELECT * FROM scheduled_tasks
+           WHERE enabled = 1 AND next_run <= ?
+           ORDER BY next_run""",
+        (now,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_task(task_id: int, **fields) -> bool:
+    """只允许改白名单里的列，避免调用方把 SQL 玩坏。"""
+    clean = {k: v for k, v in fields.items() if k in TASK_FIELDS}
+    if not clean:
+        return False
+    sets = ", ".join(f"{k} = ?" for k in clean)
+    with transaction() as tx:
+        cur = tx.execute(
+            f"UPDATE scheduled_tasks SET {sets} WHERE id = ?",
+            [*clean.values(), int(task_id)],
+        )
+        return cur.rowcount > 0
+
+
+def delete_task(task_id: int) -> bool:
+    with transaction() as tx:
+        cur = tx.execute("DELETE FROM scheduled_tasks WHERE id = ?", (int(task_id),))
+        return cur.rowcount > 0
+
+
 if __name__ == "__main__":
     from server.storage.db import init_db
     init_db()

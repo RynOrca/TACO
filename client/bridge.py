@@ -115,6 +115,8 @@ class Link:
             self.state = "open"
             self.detail = ""
         self.publish_state()
+        # 心跳：桥替所有页面定时发 ping，服务端用它判断"这条连接还活着"
+        self.client.start_heartbeat()
         try:
             self.client.recv_loop()
         finally:
@@ -125,6 +127,12 @@ class Link:
 
     # ---------------------------------------------------------------- 收发
     def _on_tcp_message(self, msg: dict) -> None:
+        if msg.get("type") == "pong":
+            # RTT 只用于服务端/桥的日志与后续扩展，不塞给前端（前端消息类型里没有 metrics）
+            rtt = self.client.note_pong(msg)
+            if rtt is not None:
+                print(f"[Link] {self.client.host}:{self.client.port} RTT {rtt}ms")
+            return
         self.publish(msg)
 
     def send(self, msg: dict) -> None:

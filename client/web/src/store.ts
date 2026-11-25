@@ -1,6 +1,7 @@
 import { AGENT, MAIN, pmThread, threadUser } from './types';
 import type {
   ChatEvent,
+  GameState,
   HistoryItem,
   LinkState,
   ServerMsg,
@@ -36,6 +37,8 @@ export interface State {
   bottomToken: number;
   /** 每次 +1 表示该重新拉一次待办 */
   todosDirty: number;
+  /** 井字棋面板（服务端只把状态发给下棋本人） */
+  game: GameState | null;
 }
 
 export type Action =
@@ -272,6 +275,22 @@ function onServer(state: State, msg: ServerMsg): State {
     case 'hello':
       return { ...state, imageBase: msg.image_base ?? '' };
 
+    case 'game': {
+      if (msg.action === 'closed') return { ...state, game: null };
+      const board = msg.board ?? [];
+      if (board.length !== 9) return state;
+      return {
+        ...state,
+        game: {
+          board,
+          turn: msg.turn === 'O' ? 'O' : 'X',
+          over: Boolean(msg.over),
+          result: (msg.result ?? '') as GameState['result'],
+          score: msg.score ?? { win: 0, lose: 0, draw: 0 },
+        },
+      };
+    }
+
     case 'error': {
       // 桥/页面重连后是一条新的 TCP 连接，服务端已经没有我这个身份了
       if (msg.code === 'NOT_LOGIN' && state.me) {
@@ -412,6 +431,7 @@ export function initialState(): State {
     prependToken: 0,
     bottomToken: 0,
     todosDirty: 0,
+    game: null,
   };
 }
 

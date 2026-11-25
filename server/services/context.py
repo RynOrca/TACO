@@ -26,10 +26,16 @@ class RequestContext:
     services: Optional[Services] = None
 
     def send(self, msg: dict) -> bool:
-        from server.network.protocol import pack_message
+        from server.network.protocol import FrameTooLarge, pack_message
         try:
             self.conn.sendall(pack_message(msg))
             return True
+        except FrameTooLarge:
+            try:
+                self.conn.sendall(pack_message(err("MSG_TOO_LONG", "回包超过单帧上限，已截断")))
+            except Exception:
+                pass
+            return False
         except Exception as e:
             print(f"发送失败 {self.addr}: {e}")
             return False

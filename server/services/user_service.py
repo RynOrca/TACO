@@ -5,10 +5,11 @@ import hmac
 import os
 import socket
 import threading
+import time
 from typing import Dict, List, Optional
 
 from server.console import log_line
-from server.network.protocol import pack_message
+from server.network.protocol import FrameTooLarge, pack_message
 from server.services.context import RequestContext, err
 from server.storage import chat_history
 
@@ -37,7 +38,52 @@ def verify_password(password: str, stored: str) -> bool:
 class UserService:
     def __init__(self):
         self._pool: Dict[str, socket.socket] = {}
+        # 每条连接最后一次收到数据的时间。心跳超时回收靠它判断，与是否登录无关。
+        self._conns: Dict[socket.socket, float] = {}
         self._lock = threading.Lock()
+
+    # ---------------------------------------------------------------- 心跳
+    def attach(self, conn: socket.socket) -> None:
+        with self._lock:
+            self._conns[conn] = time.time()
+
+    def touch(self, conn: socket.socket) -> None:
+        """收到任何帧都刷新活跃时间，不只是 ping——正常聊天也证明连接活着。"""
+        with self._lock:
+            if conn in self._conns:
+                self._conns[conn] = time.time()
+
+    def detach(self, conn: socket.socket) -> None:
+        with self._lock:
+            self._conns.pop(conn, None)
+
+    def reap(self, idle_timeout: int) -> List[str]:
+        """回收超过 idle_timeout 秒没有任何数据的连接，返回被踢下线的用户名。"""
+        now = time.time()
+        with self._lock:
+            expired = [sock for sock, ts in self._conns.items() if now - ts > idle_timeout]
+        dead: List[str] = []
+        for sock in expired:
+            with self._lock:
+                user = next((u for u, s in self._pool.items() if s is sock), "")
+                idle = int(now - self._conns.get(sock, now))
+            log_line(
+                f"[Heartbeat] {user or '未登录连接'} 超过 {idle}s 没有任何数据"
+                f"（阈值 {idle_timeout}s），判定掉线并断开"
+            )
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                sock.close()
+            except OSError:
+                pass
+            self.logout(user, sock)
+            self.detach(sock)
+            if user:
+                dead.append(user)
+        return dead
 
     def login(self, user_id: str, conn: socket.socket) -> bool:
         user_id = (user_id or "").strip()
@@ -77,12 +123,19 @@ class UserService:
         try:
             conn.sendall(pack_message(msg))
             return True
+        except FrameTooLarge as e:
+            log_line(f"[Protocol] 回包超过单帧上限，已丢弃：{e}")
+            return False
         except Exception as e:
             log_line(f"[User] 发送给 {user_id} 失败: {e}")
             return False
 
     def broadcast(self, msg: dict, exclude: Optional[str] = None) -> int:
-        pkg = pack_message(msg)
+        try:
+            pkg = pack_message(msg)
+        except FrameTooLarge as e:
+            log_line(f"[Protocol] 广播包超过单帧上限，已丢弃：{e}")
+            return 0
         with self._lock:
             items = list(self._pool.items())
         count = 0

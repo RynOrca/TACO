@@ -1,6 +1,7 @@
 import { threadOf } from '../store';
 import type { State } from '../store';
 import { MAIN } from '../types';
+import { GamePanel } from './GamePanel';
 
 const QUICK = [
   { label: '总结最近 30 条消息', question: '总结一下本群最近的讨论，并把待办事项列出来', scope: 'group' as const },
@@ -14,12 +15,18 @@ export function SidePanel({
   refreshTodos,
   autoSummary,
   setIncludePrivate,
+  onGameMove,
+  onGameStart,
+  onGameQuit,
 }: {
   state: State;
   askAgent: (question: string, scope: 'private' | 'group') => void;
   refreshTodos: () => void;
   autoSummary: (action: 'status' | 'on' | 'off' | 'now', minutes?: number) => void;
   setIncludePrivate: (value: boolean) => void;
+  onGameMove: (cell: number) => void;
+  onGameStart: () => void;
+  onGameQuit: () => void;
 }) {
   const auto = state.autoSummary;
   const members = [...state.online];
@@ -46,6 +53,13 @@ export function SidePanel({
           <span className="st">bot</span>
         </div>
       </section>
+
+      <GamePanel
+        game={state.game}
+        onMove={onGameMove}
+        onStart={onGameStart}
+        onQuit={onGameQuit}
+      />
 
       <section>
         <h2>

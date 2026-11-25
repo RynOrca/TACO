@@ -2,8 +2,9 @@ import socket
 import threading
 import time
 
+from server import config
 from server.console import make_console_safe
-from server.network.protocol import pack_message, try_unpack
+from server.network.protocol import ProtocolError, pack_message, try_unpack
 
 HOST = "127.0.0.1"
 PORT = 10086
@@ -16,7 +17,11 @@ class ChatClient:
         self.sock = None
         self.username = None
         self.running = False
+        self.rtt_ms = None
         self._send_lock = threading.Lock()   # 保护 sendall，避免多线程交错
+        self._ping_sent = {}                 # seq -> 发送时刻(ms)，用来算 RTT
+        self._ping_seq = 0
+        self._hb_stop = threading.Event()
 
     def connect(self, retries=3, delay=2):
         for i in range(retries):
@@ -24,12 +29,39 @@ class ChatClient:
                 self.sock = socket.create_connection((self.host, self.port), timeout=5)
                 self.sock.settimeout(None)
                 self.running = True
+                # 重连时换一个新的停止事件，避免上一轮心跳线程被"复活"
+                self._hb_stop = threading.Event()
                 print(f"已连接到服务器 {self.host}:{self.port}")
                 return True
             except Exception as e:
                 print(f"连接失败({i + 1}/{retries}): {e}")
                 time.sleep(delay)
         return False
+
+    def start_heartbeat(self, interval: int = None):
+        """定时发 ping。服务端靠它判断连接是否还活着，同时用应答算 RTT。"""
+        interval = interval or config.HEARTBEAT_SECONDS
+        stop = self._hb_stop
+
+        def loop():
+            while self.running and not stop.wait(interval):
+                self._ping_seq += 1
+                now_ms = int(time.time() * 1000)
+                self._ping_sent[self._ping_seq] = now_ms
+                # 只留最近 10 个，避免长时间运行后字典无限增长
+                for seq in list(self._ping_sent)[:-10]:
+                    self._ping_sent.pop(seq, None)
+                self.send({"type": "ping", "seq": self._ping_seq, "ts": now_ms})
+
+        threading.Thread(target=loop, daemon=True, name="heartbeat").start()
+
+    def note_pong(self, msg: dict):
+        """收到 pong 时算 RTT（毫秒）。返回 None 表示这轮的 seq 已经过期。"""
+        seq = msg.get("seq")
+        sent = self._ping_sent.pop(seq, None) if seq is not None else None
+        if sent is not None:
+            self.rtt_ms = int(time.time() * 1000) - sent
+        return self.rtt_ms
 
     def send(self, msg_dict: dict):
         if not self.sock:
@@ -57,7 +89,12 @@ class ChatClient:
 
             buffer += data
             while True:
-                msg, buffer = try_unpack(buffer)
+                try:
+                    msg, buffer = try_unpack(buffer)
+                except ProtocolError as e:
+                    print(f"\n[协议错误] {e}")
+                    self.running = False
+                    return
                 if msg is None: # 包没收全，等下一批
                     break
                 if not msg: # 非法数据，跳过
@@ -90,13 +127,16 @@ class ChatClient:
             state = "开启" if msg.get("enabled") else "关闭"
             print(f"\n[定时总结] {state}（间隔 {msg.get('seconds', 0)} 秒）")
         elif mtype == "pong":
-            print("\n[pong] 服务器存活")
+            rtt = self.note_pong(msg)
+            suffix = f"，RTT {rtt}ms" if rtt is not None else ""
+            print(f"\n[pong] 服务器存活{suffix}")
         else:
             print(f"\n[未知消息] {msg}")
 
     # ---------- 关闭 ---------
     def close(self):
         self.running = False
+        self._hb_stop.set()
         if self.sock:
             try:
                 self.sock.shutdown(socket.SHUT_RDWR)
@@ -132,6 +172,8 @@ def main():
     # 启动接收线程（daemon，主线程退出即结束）
     t = threading.Thread(target=client.recv_loop, daemon=True)
     t.start()
+    # 心跳线程：服务端靠它判断这条连接还活着，顺带测 RTT
+    client.start_heartbeat()
 
     print(HELP_TEXT)
     try:
@@ -170,6 +212,16 @@ def main():
             # ---- 退出 ----
             if line == "/quit":
                 break
+
+            # ---- 井字棋 ----
+            if line.startswith("/game"):
+                client.send({"type": "game", "text": line[len("/game"):].strip()})
+                continue
+
+            # ---- 定时任务 ----
+            if line.startswith("/task"):
+                client.send({"type": "task", "text": line[len("/task"):].strip()})
+                continue
 
             # ---- 定时总结 ----
             if line.startswith("/auto"):
