@@ -35,6 +35,8 @@ export interface State {
   latency: { ms: number | null; at: number | null };
   /** 服务端在登录成功前就推了未读回执，先存着，等 me 确定再落到会话上 */
   unreadPending: UnreadItem[];
+  /** 被禁言的人 → 到期时间（ISO） */
+  mutes: Record<string, string>;
   /** 有更早的历史被插到前面，Transcript 要保住滚动位置 */
   prependToken: number;
   /** 需要滚到底部 */
@@ -326,6 +328,14 @@ function onServer(state: State, msg: ServerMsg): State {
     case 'unread':
       return { ...state, unreadPending: msg.unread_items ?? [] };
 
+    case 'muted': {
+      const mutes: Record<string, string> = {};
+      for (const item of msg.mutes ?? []) {
+        if (item && typeof item === 'object' && item.user_id) mutes[item.user_id] = item.until_at;
+      }
+      return { ...state, mutes };
+    }
+
     case 'todos':
       return { ...state, todos: (msg.items ?? []) as TodoItem[] };
 
@@ -490,6 +500,7 @@ export function initialState(): State {
     help: false,
     latency: { ms: null, at: null },
     unreadPending: [],
+    mutes: {},
     prependToken: 0,
     bottomToken: 0,
     todosDirty: 0,

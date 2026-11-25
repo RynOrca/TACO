@@ -145,6 +145,14 @@ class UserService:
         log_line(f"用户 [{user_id}] 登录成功，room={ctx.room_id}")
         self.push_userlist()
 
+        # 当前禁言名单：客户端据此在成员面板上标记
+        try:
+            mutes = chat_history.active_mutes()
+            if mutes:
+                ctx.send({"type": "muted", "mutes": mutes})
+        except Exception as e:
+            log_line(f"[User] 读取禁言名单失败: {e}")
+
         # 离线期间别人发来的消息：只给"数字和读到的位置"，内容客户端用历史分页自己拉
         try:
             marks = chat_history.unread_items(user_id)

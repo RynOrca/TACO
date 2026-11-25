@@ -51,6 +51,8 @@ TYPE_CODE = {
     "read": 14,
     "unread": 15,
     "recall": 16,
+    "mute": 17,
+    "muted": 18,
 }
 
 CODE_TYPE = {code: name for name, code in TYPE_CODE.items()}

@@ -148,6 +148,46 @@ def search_history(room_id: int, keywords: List[str], limit: int = 20) -> List[M
     return [row_to_message(r) for r in rows]
 
 
+def mute_user(user_id: str, until_at: str, by_user: str, reason: str = "") -> None:
+    with transaction() as tx:
+        tx.execute(
+            """INSERT INTO mutes (user_id, until_at, by_user, reason, created_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user_id) DO UPDATE
+                 SET until_at = excluded.until_at,
+                     by_user  = excluded.by_user,
+                     reason   = excluded.reason,
+                     created_at = excluded.created_at""",
+            (user_id, until_at, by_user, reason, now_iso()),
+        )
+
+
+def unmute_user(user_id: str) -> bool:
+    with transaction() as tx:
+        cur = tx.execute("DELETE FROM mutes WHERE user_id = ?", (user_id,))
+        return cur.rowcount > 0
+
+
+def active_mutes() -> List[dict]:
+    """还没到期的禁言。过期的顺手清掉，避免越积越多。"""
+    now = now_iso()
+    with transaction() as tx:
+        tx.execute("DELETE FROM mutes WHERE until_at <= ?", (now,))
+        rows = tx.execute(
+            "SELECT user_id, until_at, by_user, reason FROM mutes ORDER BY until_at"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def active_mute(user_id: str) -> Optional[dict]:
+    row = get_conn().execute(
+        "SELECT user_id, until_at, by_user, reason FROM mutes WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    return dict(row) if row["until_at"] > now_iso() else None
+
+
 def get_message(msg_id: int) -> Optional[dict]:
     row = get_conn().execute(
         """SELECT id, room_id, sender, content, msg_type, created_at

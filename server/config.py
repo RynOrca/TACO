@@ -32,6 +32,9 @@ IMAGE_DIR = Path(os.getenv("CHAT_IMAGE_DIR", str(Path(DB_PATH).parent / "images"
 IMAGE_PORT = _int("CHAT_IMAGE_PORT", 10087)
 IMAGE_MAX_BYTES = _int("CHAT_IMAGE_MAX_BYTES", 8 * 1024 * 1024)
 
+# 管理员（能禁言别人）：逗号分隔，留空则没人有权限
+ADMIN_USERS = [name.strip() for name in os.getenv("ADMIN_USERS", "").split(",") if name.strip()]
+
 AGENT_TIMEOUT = _int("AGENT_TIMEOUT", 60)
 AGENT_MAX_STEPS = _int("AGENT_MAX_STEPS", 5)
 MAX_HISTORY = _int("MAX_HISTORY", 20)

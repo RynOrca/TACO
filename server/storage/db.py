@@ -54,6 +54,14 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_msg_room_time ON messages(room_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_msg_sender    ON messages(sender);
 
+CREATE TABLE IF NOT EXISTS mutes (
+    user_id    TEXT PRIMARY KEY,
+    until_at   TEXT NOT NULL,
+    by_user    TEXT,
+    reason     TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS room_reads (
     room_id      INTEGER NOT NULL,
     user_id      TEXT NOT NULL,

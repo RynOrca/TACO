@@ -47,6 +47,8 @@ export interface ServerMsg {
   room_id?: number;
   /** group 消息里的 @提及（只含真实存在的用户名） */
   mentions?: string[];
+  /** muted 回执：当前被禁言的人和到期时间（与 userlist 的 users 共用字段，类型按 type 区分） */
+  mutes?: MuteInfo[];
 }
 
 export interface HistoryItem {
@@ -74,6 +76,7 @@ export type SendMsg =
   | { type: 'ping'; t: number }
   | { type: 'read'; id?: number; target?: string; agent?: boolean }
   | { type: 'recall'; id: number }
+  | { type: 'mute'; action: 'mute' | 'unmute' | 'list'; target?: string; minutes?: number }
   | { type: 'autosummary'; action: 'status' | 'on' | 'off' | 'now'; minutes?: number }
   | { type: 'reconnect' };
 
@@ -101,6 +104,13 @@ export interface ChatEvent {
   agentScope?: 'private' | 'group';
   /** 这条消息 @了谁 */
   mentions?: string[];
+}
+
+export interface MuteInfo {
+  user_id: string;
+  until_at: string;
+  by_user?: string | null;
+  reason?: string | null;
 }
 
 export interface UnreadItem {

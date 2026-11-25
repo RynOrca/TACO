@@ -1145,6 +1145,16 @@ textarea {
   color: var(--ok);
 }
 
+.mem .st.mute {
+  padding: 0 4px;
+  border: 1px solid var(--warn-line);
+  background: var(--warn-bg);
+  color: var(--warn);
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 9px;
+}
+
 .todo {
   display: grid;
   grid-template-columns: 13px minmax(0, 1fr);

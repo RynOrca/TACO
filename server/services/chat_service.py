@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
+from datetime import timedelta
+
 from server import config
 from server.agent import agent_core
 from server.console import log_chat, log_line
@@ -59,6 +61,63 @@ class ChatService:
         chat_history.join_room(room_id, user_id)
         return room_id
 
+    # ---------------------------------------------------------------- 禁言
+    @staticmethod
+    def mute_block(ctx: RequestContext) -> Optional[dict]:
+        """被禁言的人不能发言（私聊、群聊、问 Agent 都挡）。"""
+        muted = chat_history.active_mute(ctx.user_id)
+        if not muted:
+            return None
+        until = parse_ts(muted["until_at"])
+        left = int((until - datetime.now(timezone.utc)).total_seconds()) if until else 0
+        return err("MUTED", f"你被 {muted['by_user'] or '管理员'} 禁言中，还剩 {max(left, 1)} 秒")
+
+    def handle_mute(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
+        need = ctx.require_login()
+        if need:
+            return need
+        if ctx.user_id not in config.ADMIN_USERS:
+            return err("FORBIDDEN", "只有管理员能禁言/解禁（在 .env 里配置 ADMIN_USERS）")
+
+        action = (msg.get("action") or "list").strip()
+        if action == "list":
+            return {"type": "muted", "mutes": chat_history.active_mutes()}
+
+        target = (msg.get("target") or "").strip()
+        if not target:
+            return err("BAD_PARAM", "target 不能为空")
+        if target == ctx.user_id:
+            return err("BAD_PARAM", "不能禁言自己")
+        if chat_history.get_user(target) is None:
+            return err("NOT_FOUND", f"用户 {target} 不存在")
+
+        if action == "unmute":
+            removed = chat_history.unmute_user(target)
+            self.broadcast_mutes()
+            if not removed:
+                return err("BAD_STATE", f"{target} 当前没有被禁言")
+            return {"type": "system", "msg": f"{ctx.user_id} 解除了 {target} 的禁言"}
+
+        if action != "mute":
+            return err("BAD_PARAM", "action 只能是 mute / unmute / list")
+
+        try:
+            minutes = int(msg.get("minutes") or 5)
+        except (TypeError, ValueError):
+            return err("BAD_PARAM", "minutes 必须是整数分钟")
+        if not 1 <= minutes <= 1440:
+            return err("BAD_PARAM", "minutes 必须在 1-1440 之间（最长 24 小时）")
+
+        until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+        chat_history.mute_user(target, until.isoformat(timespec="seconds"),
+                               ctx.user_id, (msg.get("reason") or "").strip())
+        self.broadcast_mutes()
+        log_line(f"[禁言] {ctx.user_id} 禁言 {target} {minutes} 分钟")
+        return {"type": "system", "msg": f"{ctx.user_id} 禁言 {target} {minutes} 分钟"}
+
+    def broadcast_mutes(self) -> None:
+        self.users.broadcast({"type": "muted", "mutes": chat_history.active_mutes()})
+
     # ---------------------------------------------------------------- 群聊/私聊
     @staticmethod
     def _extract_body(msg: dict) -> Tuple[Optional[str], Optional[str], Optional[dict]]:
@@ -81,6 +140,9 @@ class ChatService:
         need = ctx.require_login()
         if need:
             return need
+        muted = self.mute_block(ctx)
+        if muted:
+            return muted
 
         content, image, bad = self._extract_body(msg)
         if bad:
@@ -116,6 +178,9 @@ class ChatService:
         need = ctx.require_login()
         if need:
             return need
+        muted = self.mute_block(ctx)
+        if muted:
+            return muted
 
         target = (msg.get("target") or "").strip()
         if not target:
@@ -171,6 +236,9 @@ class ChatService:
         need = ctx.require_login()
         if need:
             return need
+        muted = self.mute_block(ctx)
+        if muted:
+            return muted
 
         text = (msg.get("msg") or "").strip()
         if not text:

@@ -165,6 +165,29 @@ export function useChat(): Chat {
           send({ type: 'private', target, msg: msg.join(' ') });
           return;
         }
+        if (cmd === '/mute' || cmd === '/unmute' || cmd === '/muted') {
+          if (cmd === '/muted') {
+            send({ type: 'mute', action: 'list' });
+            return;
+          }
+          const [target, minutesText] = rest;
+          if (!target) {
+            dispatch({ type: 'local', kind: 'error', text: `用法：${cmd} 用户名${cmd === '/mute' ? ' 分钟数' : ''}` });
+            return;
+          }
+          const minutes = cmd === '/mute' ? Number(minutesText || 5) : 0;
+          if (cmd === '/mute' && (!Number.isFinite(minutes) || minutes < 1)) {
+            dispatch({ type: 'local', kind: 'error', text: '用法：/mute 用户名 分钟数（默认 5）' });
+            return;
+          }
+          send({
+            type: 'mute',
+            action: cmd === '/mute' ? 'mute' : 'unmute',
+            target,
+            ...(minutes ? { minutes } : {}),
+          });
+          return;
+        }
         if (cmd === '/auto') {
           const arg = (rest[0] || '').toLowerCase();
           if (!arg) send({ type: 'autosummary', action: 'status' });
