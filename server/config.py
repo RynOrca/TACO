@@ -48,6 +48,18 @@ AGENT_TIMEOUT = _int("AGENT_TIMEOUT", 60)
 AGENT_MAX_STEPS = _int("AGENT_MAX_STEPS", 5)
 MAX_HISTORY = _int("MAX_HISTORY", 20)
 
+# ==================== 心跳与断线检测 ====================
+# 客户端每隔多少秒发一次 ping；服务端超过 IDLE_TIMEOUT 秒没收到任何帧就判定掉线。
+# 演示"拔网线"时可以临时调小（例如 5 / 15），生产建议 20 / 60。
+HEARTBEAT_SECONDS = _int("CHAT_HEARTBEAT_SECONDS", 20)
+IDLE_TIMEOUT = _int("CHAT_IDLE_TIMEOUT", 60)
+# 回收线程的扫描间隔
+REAP_INTERVAL = _int("CHAT_REAP_INTERVAL", 5)
+
+# ==================== 定时任务 ====================
+# 调度线程多久检查一次到期任务（秒）。越小越准，但扫库越频繁。
+TASK_TICK_SECONDS = _int("CHAT_TASK_TICK", 5)
+
 # Agent 定时总结：默认关闭，0 表示不自动跑；客户端也能用 /auto 分钟 临时开启
 AGENT_AUTO_SUMMARY_SECONDS = _int("AGENT_AUTO_SUMMARY_SECONDS", 0)
 AGENT_AUTO_SUMMARY_MIN_MESSAGES = _int("AGENT_AUTO_SUMMARY_MIN_MESSAGES", 3)

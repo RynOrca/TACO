@@ -72,6 +72,9 @@ export default function App() {
         refreshTodos={chat.refreshTodos}
         autoSummary={chat.autoSummary}
         setIncludePrivate={chat.setIncludePrivate}
+        onGameMove={chat.gameMove}
+        onGameStart={chat.gameStart}
+        onGameQuit={chat.gameQuit}
       />
 
       {state.auth.open && (

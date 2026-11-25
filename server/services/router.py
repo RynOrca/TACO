@@ -1,5 +1,6 @@
 # 消息路由：把 type 映射到 handler，网络层只调 dispatch
 
+import time
 from typing import Callable, Dict, Optional
 from server.services.context import RequestContext, err
 Handler = Callable[[RequestContext, dict], Optional[dict]]
@@ -33,6 +34,23 @@ class MessageRouter:
             return err("INTERNAL", "服务器内部错误")
 
 
+def _handle_ping(ctx: RequestContext, msg: dict) -> dict:
+    """心跳应答。
+
+    两套字段都回：`seq` 给命令行客户端/桥算 RTT，`t` 给 Web 前端算 RTT
+    （前端整条链路是 页面 → 桥 → TCP → 服务端，只有拿回原样时间戳才准）。
+    """
+    reply = {
+        "type": "pong",
+        "seq": msg.get("seq"),
+        "server_time": int(time.time() * 1000),
+        "msg": "pong",
+    }
+    if msg.get("t") is not None:
+        reply["t"] = msg.get("t")
+    return reply
+
+
 def build_default_router(services) -> MessageRouter:
     router = MessageRouter()
     router.register("register", services.users.handle_register)
@@ -47,8 +65,10 @@ def build_default_router(services) -> MessageRouter:
     router.register("history", services.chat.handle_history)
     # Agent 定时总结：查询状态 / 开 / 关 / 立刻跑一次
     router.register("autosummary", services.chat.handle_auto_summary)
-    # 心跳 + 延迟监测：客户端带上发车时的 t，服务端原样回显，客户端据此算 RTT
-    router.register("ping", lambda ctx, msg: {
-        "type": "pong", "msg": "pong", "t": msg.get("t"),
-    })
+    # 通用定时任务：list / add / del / on / off
+    router.register("task", services.chat.handle_task)
+    # 井字棋：start / move / board / status / quit
+    router.register("game", services.chat.handle_game)
+    # 心跳：客户端定时发 ping，服务端回 pong（last_seen 由网络层在收包时刷新）
+    router.register("ping", _handle_ping)
     return router

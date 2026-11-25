@@ -1,6 +1,7 @@
 import { AGENT, MAIN, pmThread, threadUser } from './types';
 import type {
   ChatEvent,
+  GameState,
   HistoryItem,
   LinkState,
   ServerMsg,
@@ -43,6 +44,8 @@ export interface State {
   bottomToken: number;
   /** 每次 +1 表示该重新拉一次待办 */
   todosDirty: number;
+  /** 井字棋面板（服务端只把状态发给下棋本人） */
+  game: GameState | null;
 }
 
 export type Action =
@@ -157,6 +160,11 @@ function eventFromHistory(item: HistoryItem): ChatEvent {
       mime: item.meta?.mime,
     };
     event.text = `[文件 ${event.attachment.name}]`;
+  }
+  if (item.msg_type === 'recalled') {
+    // 撤回的消息库里 content 是空的，历史里要还原成一条提示，否则会渲染成空白 SYSTEM 条
+    event.kind = 'recall';
+    event.text = `${item.sender || '有人'} 撤回了一条消息`;
   }
   if (item.msg_type === 'agent_ask_group' || item.msg_type === 'agent_ask_private') {
     event.kind = 'ask';
@@ -385,10 +393,26 @@ function onServer(state: State, msg: ServerMsg): State {
       return { ...state, imageBase: msg.image_base ?? '' };
 
     case 'pong':
-      // 只认自己发出去的那次探测，别被别人（比如心跳）的 pong 搅乱
+      // 只认自己发出去的那次探测（比对 t），心跳的 pong 不会污染读数
       return typeof msg.t === 'number'
         ? { ...state, latency: { ms: Math.max(0, Date.now() - msg.t), at: Date.now() } }
         : state;
+
+    case 'game': {
+      if (msg.action === 'closed') return { ...state, game: null };
+      const board = msg.board ?? [];
+      if (board.length !== 9) return state;
+      return {
+        ...state,
+        game: {
+          board,
+          turn: msg.turn === 'O' ? 'O' : 'X',
+          over: Boolean(msg.over),
+          result: (msg.result ?? '') as GameState['result'],
+          score: msg.score ?? { win: 0, lose: 0, draw: 0 },
+        },
+      };
+    }
 
     case 'error': {
       // 桥/页面重连后是一条新的 TCP 连接，服务端已经没有我这个身份了
@@ -537,6 +561,7 @@ export function initialState(): State {
     prependToken: 0,
     bottomToken: 0,
     todosDirty: 0,
+    game: null,
   };
 }
 

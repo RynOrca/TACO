@@ -3,11 +3,12 @@ import threading
 from server import config
 from server.console import make_console_safe
 from server.network.image_server import start_image_server
+from server.network.keepalive import IdleReaper
 from server.network.socket_server import SocketServer
 from server.services.chat_service import ChatService
 from server.services.context import Services
 from server.services.router import build_default_router
-from server.services.scheduler import AutoSummaryScheduler
+from server.services.scheduler import TaskScheduler
 from server.services.user_service import UserService
 from server.storage.db import init_db
 
@@ -26,13 +27,18 @@ def main():
     image_server = start_image_server(config.HOST, config.IMAGE_PORT)
     print(f"附件服务启动成功，监听 {config.HOST}:{config.IMAGE_PORT}（图片 / 文件上传下载）")
 
-    # Agent 定时总结
-    chat.scheduler = AutoSummaryScheduler(chat, config.AGENT_AUTO_SUMMARY_SECONDS)
+    # 心跳与断线检测：客户端 ping，服务端按 last_seen 回收半开连接
+    reaper = IdleReaper(users)
+    reaper.start()
+    print(f"心跳检测已启动：阈值 {config.IDLE_TIMEOUT}s，扫描间隔 {config.REAP_INTERVAL}s")
+
+    # 定时任务：summary / reminder 统一调度，任务落库，重启后恢复
+    chat.scheduler = TaskScheduler(chat, users, config.AGENT_AUTO_SUMMARY_SECONDS)
     chat.scheduler.start()
     if config.AGENT_AUTO_SUMMARY_SECONDS > 0:
-        print(f"Agent 定时总结已开启：每 {config.AGENT_AUTO_SUMMARY_SECONDS} 秒一次")
+        print(f"定时任务已启动：默认总结周期 {config.AGENT_AUTO_SUMMARY_SECONDS} 秒")
     else:
-        print("Agent 定时总结默认关闭，客户端可用 /auto 5 开启（每 5 分钟一次）")
+        print("定时任务已启动：/task 管理任务（/auto 仍兼容）")
 
     server = SocketServer(router, services)
     try:
@@ -40,6 +46,7 @@ def main():
     except KeyboardInterrupt:
         print("收到 Ctrl+C，服务器关闭中…")
     finally:
+        reaper.stop()
         chat.scheduler.stop()
         image_server.shutdown()
         server.stop()

@@ -53,6 +53,13 @@ export interface ServerMsg {
   file?: string;
   /** 附件附加信息 */
   meta?: AttachmentMeta | null;
+  /* 井字棋结构化状态 */
+  action?: string;
+  board?: string[];
+  turn?: 'X' | 'O';
+  over?: boolean;
+  result?: string;
+  score?: { win: number; lose: number; draw: number };
 }
 
 export interface HistoryItem {
@@ -69,6 +76,15 @@ export interface TodoItem {
   content?: string;
   status?: string;
   assignee?: string | null;
+}
+
+/** 井字棋面板状态（只发给下棋的本人） */
+export interface GameState {
+  board: string[];               // 9 格：" " / "X" / "O"
+  turn: 'X' | 'O';
+  over: boolean;
+  result: '' | 'win' | 'lose' | 'draw';
+  score: { win: number; lose: number; draw: number };
 }
 
 export type SendMsg =
@@ -100,6 +116,8 @@ export type SendMsg =
   | { type: 'recall'; id: number }
   | { type: 'mute'; action: 'mute' | 'unmute' | 'list'; target?: string; minutes?: number }
   | { type: 'autosummary'; action: 'status' | 'on' | 'off' | 'now'; minutes?: number }
+  | { type: 'task'; text: string }
+  | { type: 'game'; text: string }
   | { type: 'reconnect' };
 
 export type EventKind = 'group' | 'private' | 'agent' | 'ask' | 'recall' | 'system' | 'error';

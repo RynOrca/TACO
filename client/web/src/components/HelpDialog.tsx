@@ -7,6 +7,13 @@ const COMMANDS: { key: string; desc: string }[] = [
   { key: '/auto 5', desc: '让 Agent 每 5 分钟自动总结一次群聊（1-120 分钟）' },
   { key: '/auto now', desc: '立刻总结一次（不受"新消息条数"门槛限制）' },
   { key: '/auto off', desc: '关闭定时总结；只发 /auto 可以查当前状态' },
+  { key: '/game start', desc: '和 Agent 下一局井字棋，你执 X 先手；每走一步 Agent 都会用工具落子' },
+  { key: '/game move 5', desc: '把棋子下在第 5 格（1-9 从左到右、从上到下），非法格子会被服务端拒绝' },
+  { key: '/game board / status / quit', desc: '看棋盘 / 看战绩 / 退出当前对局' },
+  { key: '/task list', desc: '查看全部定时任务（编号、类型、周期、下次时间、状态）' },
+  { key: '/task add summary every:10', desc: '每 10 分钟让 Agent 总结一次群聊' },
+  { key: '/task add reminder in:5 开会', desc: '5 分钟后广播一句提醒；把 in:5 换成 every:30 就是每 30 分钟提醒一次' },
+  { key: '/task del|on|off 编号', desc: '删除 / 开启 / 暂停某个任务，任务落库，服务端重启后仍然在' },
   { key: '/pm 用户名 消息', desc: '发私聊，只有对方能看到，Agent 读不到' },
   { key: '/mute 用户名 分钟', desc: '禁言某人（仅管理员，ADMIN_USERS 里配置）；右侧成员面板会出现「禁言」标记' },
   { key: '/unmute 用户名', desc: '解除禁言；/muted 查看当前禁言名单' },
@@ -38,9 +45,11 @@ const FEATURES: { key: string; desc: string }[] = [
     desc: '右栏勾选「总结时把我与 Agent 的私聊也算进去」后，Agent 才能读 agent:<我> 这一份记录一起总结；不勾就只总结群聊',
   },
   { key: '历史翻页', desc: '首屏 20 条，滚到顶部自动加载更早的一页，视口位置不会跳' },
-  { key: '离线未读', desc: '别在你离线时发的消息，登录后侧栏显示未读数，历史里用一条虚线标出"离线期间 N 条新消息"' },
+  { key: '离线未读', desc: '别人在你离线时发的消息，登录后侧栏显示未读数，历史里用一条虚线标出"离线期间 N 条新消息"' },
   { key: '延迟监测', desc: '右栏「会话」里的 rtt 是每 5 秒一次 ping 的往返时间，>200ms 标黄、超时标红' },
   { key: '定时总结', desc: '到点自动总结群聊并广播；有新消息才会总结' },
+  { key: '井字棋', desc: '服务端持有棋盘，Agent 只能通过 game_move 工具落子；模型不可用时用本地策略代打，棋局不会卡住' },
+  { key: '定时任务', desc: '定时总结 / 定时提醒统一调度，任务存 SQLite，重启不丢；到点自动广播' },
 ];
 
 function Row({ item }: { item: { key: string; desc: string } }) {
