@@ -136,6 +136,10 @@ export function SidePanel({
           <span>{mainCount}</span>
           <span>link</span>
           <span>ws → tcp 10086</span>
+          <span>rtt</span>
+          <span className={latencyClass(state)}>
+            {state.link !== 'open' ? '-' : state.latency.ms === null ? '超时' : `${state.latency.ms} ms`}
+          </span>
           <span>image</span>
           <span>{state.imageBase || '-'}</span>
           <span>queue</span>
@@ -144,6 +148,14 @@ export function SidePanel({
       </section>
     </aside>
   );
+}
+
+function latencyClass(state: State): string {
+  if (state.link !== 'open') return 'kv-bad';
+  const ms = state.latency.ms;
+  if (ms === null) return 'kv-bad';
+  if (ms > 200) return 'kv-warn';
+  return 'kv-ok';
 }
 
 function firstLine(text: string | undefined): string {

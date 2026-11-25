@@ -252,6 +252,31 @@ export function useChat(): Chat {
     requestHistory(state.active, false);
   }, [state.me, send, requestHistory]);
 
+  // 延迟监测：每 5 秒 ping 一次，15 秒没有 pong 就当超时
+  useEffect(() => {
+    if (state.link !== 'open') {
+      dispatch({ type: 'latency', ms: null });
+      return;
+    }
+    let alive = true;
+    const probe = () => {
+      if (!alive) return;
+      const sent = Date.now();
+      send({ type: 'ping', t: sent });
+      window.setTimeout(() => {
+        const last = latest.current.latency.at;
+        // 这一轮没有任何 pong（at 没被刷新）→ 判定超时
+        if (alive && (last === null || last < sent)) dispatch({ type: 'latency', ms: null });
+      }, 3000);
+    };
+    probe();
+    const timer = window.setInterval(probe, 5000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [state.link, send]);
+
   // 链路（重新）连通时探一下身份：桥重启后 TCP 连接是新的，服务端会回 NOT_LOGIN
   const lastLink = useRef(state.link);
   useEffect(() => {

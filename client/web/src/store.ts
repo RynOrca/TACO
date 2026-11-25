@@ -30,6 +30,8 @@ export interface State {
   includePrivate: boolean;
   /** /help 弹窗 */
   help: boolean;
+  /** 网络延迟：最近一次 RTT（ms）与探测时刻 */
+  latency: { ms: number | null; at: number | null };
   /** 有更早的历史被插到前面，Transcript 要保住滚动位置 */
   prependToken: number;
   /** 需要滚到底部 */
@@ -52,6 +54,7 @@ export type Action =
   | { type: 'hello'; imageBase: string }
   | { type: 'include-private'; value: boolean }
   | { type: 'help'; open: boolean }
+  | { type: 'latency'; ms: number | null }
   | { type: 'local'; kind: 'system' | 'error'; text: string };
 
 const emptyThread = (): ThreadState => ({
@@ -272,6 +275,12 @@ function onServer(state: State, msg: ServerMsg): State {
     case 'hello':
       return { ...state, imageBase: msg.image_base ?? '' };
 
+    case 'pong':
+      // 只认自己发出去的那次探测，别被别人（比如心跳）的 pong 搅乱
+      return typeof msg.t === 'number'
+        ? { ...state, latency: { ms: Math.max(0, Date.now() - msg.t), at: Date.now() } }
+        : state;
+
     case 'error': {
       // 桥/页面重连后是一条新的 TCP 连接，服务端已经没有我这个身份了
       if (msg.code === 'NOT_LOGIN' && state.me) {
@@ -381,6 +390,9 @@ export function reducer(state: State, action: Action): State {
     case 'help':
       return { ...state, help: action.open };
 
+    case 'latency':
+      return { ...state, latency: { ms: action.ms, at: Date.now() } };
+
     case 'agent-request':
       return {
         ...state,
@@ -409,6 +421,7 @@ export function initialState(): State {
     autoSummary: { enabled: false, seconds: 0 },
     includePrivate: false,
     help: false,
+    latency: { ms: null, at: null },
     prependToken: 0,
     bottomToken: 0,
     todosDirty: 0,

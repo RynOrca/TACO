@@ -39,6 +39,8 @@ export interface ServerMsg {
   seconds?: number;
   /* 桥握手：图片服务地址 */
   image_base?: string;
+  /** pong 回显的发起时间戳（ms），用于算 RTT */
+  t?: number;
 }
 
 export interface HistoryItem {
@@ -63,6 +65,7 @@ export type SendMsg =
   | { type: 'agent'; msg: string; scope: 'private' | 'group'; include_private?: boolean }
   | { type: 'history'; limit?: number; before_id?: number; target?: string; agent?: boolean }
   | { type: 'todos' }
+  | { type: 'ping'; t: number }
   | { type: 'autosummary'; action: 'status' | 'on' | 'off' | 'now'; minutes?: number }
   | { type: 'reconnect' };
 

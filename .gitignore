@@ -24,3 +24,5 @@ client/web/.vite/
 .config/
 *.log
 nul
+
+agent工具.txt

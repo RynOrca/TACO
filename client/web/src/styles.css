@@ -1133,6 +1133,18 @@ textarea {
   color: var(--faint);
 }
 
+.kv .kv-ok {
+  color: var(--ok);
+}
+
+.kv .kv-warn {
+  color: var(--warn);
+}
+
+.kv .kv-bad {
+  color: #a33;
+}
+
 /* 图片消息 */
 .pic {
   margin: 2px 0 0;

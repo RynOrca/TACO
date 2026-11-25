@@ -44,6 +44,8 @@ def build_default_router(services) -> MessageRouter:
     router.register("history", services.chat.handle_history)
     # Agent 定时总结：查询状态 / 开 / 关 / 立刻跑一次
     router.register("autosummary", services.chat.handle_auto_summary)
-    # 心跳：客户端定时发 ping，服务端回 pong
-    router.register("ping", lambda ctx, msg: {"type": "pong", "msg": "pong"})
+    # 心跳 + 延迟监测：客户端带上发车时的 t，服务端原样回显，客户端据此算 RTT
+    router.register("ping", lambda ctx, msg: {
+        "type": "pong", "msg": "pong", "t": msg.get("t"),
+    })
     return router
