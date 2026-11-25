@@ -732,8 +732,9 @@ class ChatService:
             return
         if game.forfeit(user_id):
             self.games.record(game)
+            # 保留棋盘给还在线的一方看结果，只释放玩家名额（开新局时会清理）
             self._push_game(game, note=f"{user_id} 掉线，判负")
-            self._close_game(game)
+            self.games.release(game)
             log_line(f"[Game] {user_id} 掉线，对局 {game.id} 判负收尾")
 
     def _game_agent_task(self, user_id: str, game) -> None:
