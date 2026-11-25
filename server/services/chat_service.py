@@ -3,6 +3,7 @@
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 from server import config
@@ -11,8 +12,11 @@ from server.console import log_chat, log_line
 from server.models import Message
 from server.services.context import RequestContext, err
 from server.storage import chat_history
+from server.storage.db import parse_ts
 
 MAX_MSG_LEN = 2000
+# 撤回时限：超过这个秒数就不让撤了，避免翻旧账
+RECALL_WINDOW_SECONDS = 120
 # 图片文件名由图片服务生成：32 位十六进制 + 白名单后缀，客户端改不了路径
 IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{32}\.(?:jpg|jpeg|png|gif|webp)$")
 
@@ -242,6 +246,51 @@ class ChatService:
             log_chat("Agent", "Agent", f"（只回 {user_id}）{reply}", answer_room,
                      f"agent:{user_id}")
             self.users.send_to(user_id, payload, conn=conn)
+
+    # ---------------------------------------------------------------- 撤回
+    def handle_recall(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
+        need = ctx.require_login()
+        if need:
+            return need
+        try:
+            msg_id = int(msg.get("id"))
+        except (TypeError, ValueError):
+            return err("BAD_PARAM", "撤回需要带上消息 id")
+
+        row = chat_history.get_message(msg_id)
+        if row is None:
+            return err("NOT_FOUND", "消息不存在")
+        if row["sender"] != ctx.user_id:
+            return err("FORBIDDEN", "只能撤回自己发的消息")
+        if row["msg_type"] in ("recalled", "summary"):
+            return err("BAD_STATE", "这条消息不能撤回")
+
+        created = parse_ts(row["created_at"])
+        if created is not None:
+            age = (datetime.now(timezone.utc) - created).total_seconds()
+            if age > RECALL_WINDOW_SECONDS:
+                return err("TOO_LATE", f"超过 {RECALL_WINDOW_SECONDS // 60} 分钟，不能撤回")
+
+        if not chat_history.recall_message(msg_id, ctx.user_id):
+            return err("FAILED", "撤回失败，请重试")
+
+        payload = {"type": "recall", "id": msg_id, "sender": ctx.user_id,
+                   "room_id": row["room_id"]}
+        room_name = chat_history.room_name(row["room_id"]) or ""
+        if room_name.startswith("agent:"):
+            # 我和 Agent 的私聊：只通知本人
+            ctx.send(payload)
+        elif room_name.startswith("pm:"):
+            other = room_name[3:].split(":")
+            target = next((n for n in other if n != ctx.user_id), None)
+            if target:
+                self.users.send_to(target, payload)
+            ctx.send(payload)
+        else:
+            self.users.broadcast(payload)
+
+        log_line(f"[撤回] {ctx.user_id} 撤回了 room {row['room_id']} 的消息 #{msg_id}")
+        return None
 
     # ---------------------------------------------------------------- 定时总结
     def run_scheduled_summary(self, triggered_by: Optional[str] = None,

@@ -60,10 +60,14 @@ export function buildRows(
       last = null;
     }
 
-    if (event.kind === 'system' || event.kind === 'error') {
+    if (event.kind === 'system' || event.kind === 'error' || event.kind === 'recall') {
       const tone = event.kind === 'error' ? 'error' : 'system';
       const prev = rows[rows.length - 1];
-      const item = { key: event.key, code: event.code, text: event.text };
+      const item = {
+        key: event.key,
+        code: event.code,
+        text: event.kind === 'recall' ? event.text || '一条消息被撤回' : event.text,
+      };
       if (prev && prev.type === 'note' && prev.tone === tone) {
         prev.items.push(item);
       } else {

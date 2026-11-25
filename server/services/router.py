@@ -42,6 +42,7 @@ def build_default_router(services) -> MessageRouter:
     router.register("agent", services.chat.handle_agent)
     router.register("todos", services.chat.handle_todos)
     router.register("read", services.chat.handle_read)
+    router.register("recall", services.chat.handle_recall)
     router.register("history", services.chat.handle_history)
     # Agent 定时总结：查询状态 / 开 / 关 / 立刻跑一次
     router.register("autosummary", services.chat.handle_auto_summary)

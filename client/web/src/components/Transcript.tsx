@@ -13,6 +13,7 @@ interface Props {
   prependToken: number;
   bottomToken: number;
   onLoadOlder: () => void;
+  onRecall: (id: number) => void;
 }
 
 export function Transcript({
@@ -25,6 +26,7 @@ export function Transcript({
   prependToken,
   bottomToken,
   onLoadOlder,
+  onRecall,
 }: Props) {
   const stream = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
@@ -126,6 +128,7 @@ export function Transcript({
                 cont={row.cont}
                 me={me}
                 imageBase={imageBase}
+                onRecall={onRecall}
               />
             );
           })

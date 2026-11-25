@@ -52,6 +52,7 @@ export default function App() {
           prependToken={state.prependToken}
           bottomToken={state.bottomToken}
           onLoadOlder={chat.loadOlder}
+          onRecall={chat.recall}
         />
 
         <Composer

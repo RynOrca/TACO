@@ -92,16 +92,20 @@ function Body({ event, imageBase }: { event: ChatEvent; imageBase: string }) {
   );
 }
 
+const RECALL_WINDOW = 120_000;
+
 export function Message({
   event,
   cont,
   me,
   imageBase,
+  onRecall,
 }: {
   event: ChatEvent;
   cont: ChatEvent[];
   me: string | null;
   imageBase: string;
+  onRecall: (id: number) => void;
 }) {
   const agent = event.kind === 'agent';
   const mine = !agent && event.sender === me;
@@ -127,6 +131,16 @@ export function Message({
           {agent && event.scheduled && <span className="tag">定时总结</span>}
           {event.kind === 'private' && <span className="tag">私聊</span>}
           {mine && <span className="tag">我</span>}
+          {mine && typeof event.id === 'number' && Date.now() - event.stamp < RECALL_WINDOW && (
+            <button
+              type="button"
+              className="recall"
+              title="撤回这条消息（2 分钟内）"
+              onClick={() => onRecall(event.id!)}
+            >
+              撤回
+            </button>
+          )}
           {event.agentScope && (
             <span className="tag soft">
               (Agent {event.agentScope === 'group' ? '群内公开' : '只回我'})

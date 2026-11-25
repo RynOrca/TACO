@@ -34,6 +34,8 @@ def _format_rows(rows, room_id: Optional[int] = None, header: str = "") -> str:
     lines = [header] if header else []
     for m in rows:
         if isinstance(m, Message):
+            if m.msg_type == "recalled":
+                continue          # 撤回的消息不给模型看，免得把撤回前的内容总结出去
             # 库里存的是 UTC，喂给模型前换成服务器本地时间，否则跟系统时间差 8 小时
             ts = m.timestamp.astimezone().strftime("%m-%d %H:%M") if m.timestamp else "-"
             lines.append(f"[{ts}] {m.sender}: {_truncate(m.content)}")

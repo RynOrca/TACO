@@ -18,6 +18,7 @@ export interface Chat {
   autoSummary: (action: 'status' | 'on' | 'off' | 'now', minutes?: number) => void;
   setIncludePrivate: (value: boolean) => void;
   setHelp: (open: boolean) => void;
+  recall: (id: number) => void;
   submitAuth: (kind: 'login' | 'register', user: string, password: string) => void;
   setAuthUser: (user: string) => void;
   openAuth: (open: boolean) => void;
@@ -228,6 +229,15 @@ export function useChat(): Chat {
     [send],
   );
 
+  const recall = useCallback(
+    (id: number) => {
+      if (!send({ type: 'recall', id })) {
+        dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，撤回请求没有发出去' });
+      }
+    },
+    [send],
+  );
+
   const setHelp = useCallback((open: boolean) => dispatch({ type: 'help', open }), []);
 
   const setIncludePrivate = useCallback(
@@ -322,6 +332,7 @@ export function useChat(): Chat {
     autoSummary,
     setIncludePrivate,
     setHelp,
+    recall,
     submitAuth,
     setAuthUser,
     openAuth,

@@ -44,6 +44,13 @@ def room_id_by_name(name: str) -> Optional[int]:
     return row["room_id"] if row else None
 
 
+def room_name(room_id: int) -> Optional[str]:
+    row = get_conn().execute(
+        "SELECT name FROM rooms WHERE room_id = ?", (int(room_id),)
+    ).fetchone()
+    return row["name"] if row else None
+
+
 def is_group_room(room_id: int) -> bool:
     """群聊房间还是私聊房间——Agent 工具用它守住授权边界。"""
     row = get_conn().execute(
@@ -118,7 +125,7 @@ def get_history_before(room_id: int, before_id: int, limit: int = 20) -> List[Me
 
 
 def search_history(room_id: int, keywords: List[str], limit: int = 20) -> List[Message]:
-    """多关键词 OR 检索，命中数多的排前面。"""
+    """多关键词 OR 检索，命中数多的排前面。撤回的消息不参与检索。"""
     if isinstance(keywords, str):
         keywords = [keywords]
     kws = [k.strip() for k in (keywords or []) if k and k.strip()]
@@ -133,12 +140,32 @@ def search_history(room_id: int, keywords: List[str], limit: int = 20) -> List[M
     rows = get_conn().execute(
         f"""SELECT id, room_id, sender, content, msg_type, created_at
             FROM messages
-            WHERE room_id = ? AND ({where})
+            WHERE room_id = ? AND msg_type <> 'recalled' AND ({where})
             ORDER BY ({rank}) DESC, created_at DESC
             LIMIT ?""",
         [int(room_id)] + like_params + like_params + [limit],
     ).fetchall()
     return [row_to_message(r) for r in rows]
+
+
+def get_message(msg_id: int) -> Optional[dict]:
+    row = get_conn().execute(
+        """SELECT id, room_id, sender, content, msg_type, created_at
+           FROM messages WHERE id = ?""",
+        (int(msg_id),),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def recall_message(msg_id: int, sender: str) -> bool:
+    """撤回：只把自己发的消息内容清空并改类型，保留行以便两端同时删除。"""
+    with transaction() as tx:
+        cur = tx.execute(
+            """UPDATE messages SET content = '', msg_type = 'recalled'
+               WHERE id = ? AND sender = ? AND msg_type <> 'recalled'""",
+            (int(msg_id), sender),
+        )
+        return cur.rowcount > 0
 
 
 def mark_read(room_id: int, user_id: str, upto_id: Optional[int] = None) -> int:

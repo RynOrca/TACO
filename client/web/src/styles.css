@@ -633,6 +633,29 @@ textarea {
 }
 
 /* 关键：时间占右侧独立空间，名字太长就截名字，绝不挤掉时间 */
+/* 撤回按钮：平时不占位，鼠标移到自己的消息上才出现 */
+.recall {
+  flex: none;
+  margin-left: 4px;
+  padding: 0 5px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  color: var(--muted);
+  font: 400 9.5px/1.6 var(--mono);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.msg:hover .recall {
+  opacity: 1;
+}
+
+.recall:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
 /* 灰色备注：不抢边框，只当一行小字 */
 .tag.soft {
   border: 0;

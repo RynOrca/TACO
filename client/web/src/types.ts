@@ -43,6 +43,8 @@ export interface ServerMsg {
   t?: number;
   /** unread 回执：每个会话离线期间攒了多少条、上次读到哪（与 todos 的 items 共用字段） */
   unread_items?: UnreadItem[];
+  /** recall 撤回：id 指向被撤回的那条消息 */
+  room_id?: number;
 }
 
 export interface HistoryItem {
@@ -69,10 +71,11 @@ export type SendMsg =
   | { type: 'todos' }
   | { type: 'ping'; t: number }
   | { type: 'read'; id?: number; target?: string; agent?: boolean }
+  | { type: 'recall'; id: number }
   | { type: 'autosummary'; action: 'status' | 'on' | 'off' | 'now'; minutes?: number }
   | { type: 'reconnect' };
 
-export type EventKind = 'group' | 'private' | 'agent' | 'ask' | 'system' | 'error';
+export type EventKind = 'group' | 'private' | 'agent' | 'ask' | 'recall' | 'system' | 'error';
 
 /** 一条渲染单元：聊天记录、系统提示或错误提示 */
 export interface ChatEvent {

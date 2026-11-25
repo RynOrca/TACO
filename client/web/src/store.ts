@@ -176,6 +176,26 @@ function threadKeyOf(room: string, me: string | null): string | null {
   return null;
 }
 
+function markRecalled(state: State, id: number | undefined): State {
+  if (typeof id !== 'number') return state;
+  let changed = false;
+  const threads: Record<string, ThreadState> = {};
+  for (const [key, thread] of Object.entries(state.threads)) {
+    const events = thread.events.map((event) => {
+      if (event.id !== id || event.kind === 'recall') return event;
+      changed = true;
+      return {
+        ...event,
+        kind: 'recall' as const,
+        text: `${event.sender} 撤回了一条消息`,
+        image: undefined,
+      };
+    });
+    threads[key] = changed ? { ...thread, events } : thread;
+  }
+  return changed ? { ...state, threads } : state;
+}
+
 function applyExtras(event: ChatEvent, msg: ServerMsg): void {
   if (msg.msg_type === 'image' && msg.image) {
     event.image = msg.image;
@@ -288,6 +308,9 @@ function onServer(state: State, msg: ServerMsg): State {
 
     case 'history':
       return mergeHistory(state, msg, Boolean(msg.before_id));
+
+    case 'recall':
+      return markRecalled(state, msg.id);
 
     case 'unread':
       return { ...state, unreadPending: msg.unread_items ?? [] };
