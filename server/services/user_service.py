@@ -144,4 +144,15 @@ class UserService:
 
         log_line(f"用户 [{user_id}] 登录成功，room={ctx.room_id}")
         self.push_userlist()
+
+        # 离线期间别人发来的消息：只给"数字和读到的位置"，内容客户端用历史分页自己拉
+        try:
+            marks = chat_history.unread_items(user_id)
+            if marks:
+                ctx.send({"type": "unread", "unread_items": marks})
+                total = sum(m["unread"] for m in marks)
+                log_line(f"用户 [{user_id}] 离线期间有 {total} 条未读（{len(marks)} 个会话）")
+        except Exception as e:
+            log_line(f"[User] 计算离线未读失败 {user_id}: {e}")
+
         return {"type": "system", "msg": f"登录成功，当前房间 room_id={ctx.room_id}"}

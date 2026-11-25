@@ -44,6 +44,7 @@ export default function App() {
 
         <Transcript
           events={thread.events}
+          offline={thread.offline}
           me={state.me}
           imageBase={state.imageBase}
           hasMore={thread.more}

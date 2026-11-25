@@ -41,6 +41,8 @@ export interface ServerMsg {
   image_base?: string;
   /** pong 回显的发起时间戳（ms），用于算 RTT */
   t?: number;
+  /** unread 回执：每个会话离线期间攒了多少条、上次读到哪（与 todos 的 items 共用字段） */
+  unread_items?: UnreadItem[];
 }
 
 export interface HistoryItem {
@@ -66,6 +68,7 @@ export type SendMsg =
   | { type: 'history'; limit?: number; before_id?: number; target?: string; agent?: boolean }
   | { type: 'todos' }
   | { type: 'ping'; t: number }
+  | { type: 'read'; id?: number; target?: string; agent?: boolean }
   | { type: 'autosummary'; action: 'status' | 'on' | 'off' | 'now'; minutes?: number }
   | { type: 'reconnect' };
 
@@ -93,6 +96,15 @@ export interface ChatEvent {
   agentScope?: 'private' | 'group';
 }
 
+export interface UnreadItem {
+  /** 房间名：main / agent:alice / pm:a:b */
+  room: string;
+  room_id: number;
+  unread: number;
+  last_read_id: number;
+  max_id: number;
+}
+
 export interface ThreadState {
   events: ChatEvent[];
   /** 已请求过首屏历史 */
@@ -101,6 +113,8 @@ export interface ThreadState {
   more: boolean;
   loading: boolean;
   unread: number;
+  /** 离线未读：登录时服务端告诉我"上次读到 id"，历史里在这之后插一条分界线 */
+  offline?: { count: number; sinceId: number };
 }
 
 export const MAIN = 'main';

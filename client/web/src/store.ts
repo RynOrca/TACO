@@ -7,6 +7,7 @@ import type {
   ThreadState,
   TodoItem,
   ToolStep,
+  UnreadItem,
   EventKind,
 } from './types';
 import { dateKeyOf, parseStamp, timeOf } from './time';
@@ -32,6 +33,8 @@ export interface State {
   help: boolean;
   /** 网络延迟：最近一次 RTT（ms）与探测时刻 */
   latency: { ms: number | null; at: number | null };
+  /** 服务端在登录成功前就推了未读回执，先存着，等 me 确定再落到会话上 */
+  unreadPending: UnreadItem[];
   /** 有更早的历史被插到前面，Transcript 要保住滚动位置 */
   prependToken: number;
   /** 需要滚到底部 */
@@ -163,6 +166,16 @@ function mergeHistory(state: State, msg: ServerMsg, older: boolean): State {
     : { ...next, bottomToken: next.bottomToken + 1 };
 }
 
+function threadKeyOf(room: string, me: string | null): string | null {
+  if (room === MAIN) return MAIN;
+  if (room.startsWith('agent:')) return AGENT;
+  if (room.startsWith('pm:')) {
+    const other = room.slice(3).split(':').find((name) => name !== me);
+    return other ? pmThread(other) : null;
+  }
+  return null;
+}
+
 function applyExtras(event: ChatEvent, msg: ServerMsg): void {
   if (msg.msg_type === 'image' && msg.image) {
     event.image = msg.image;
@@ -195,11 +208,27 @@ function onServer(state: State, msg: ServerMsg): State {
       const room = /room_id=(\d+)/.exec(text);
       if (room) next = { ...next, roomId: Number(room[1]) };
       if (text.includes('登录成功') && state.auth.pending) {
+        const me = state.auth.pending;
         next = {
           ...next,
-          me: state.auth.pending,
-          auth: { ...state.auth, open: false, busy: false, error: null, pending: null },
+          me,
+          auth: { ...next.auth, open: false, busy: false, error: null, pending: null },
         };
+        // 这里才知道"我"是谁，pm:a:b 这类房间名才能对应到具体会话
+        if (next.unreadPending.length) {
+          const threads = { ...next.threads };
+          for (const item of next.unreadPending) {
+            const key = threadKeyOf(item.room, me);
+            if (!key) continue;
+            const thread = threads[key] ?? emptyThread();
+            threads[key] = {
+              ...thread,
+              unread: item.unread,
+              offline: { count: item.unread, sinceId: item.last_read_id },
+            };
+          }
+          next = { ...next, threads, unreadPending: [] };
+        }
       } else if (next.auth.busy) {
         // 注册成功之类的系统回执也算一次应答，别让按钮一直转圈
         next = { ...next, auth: { ...next.auth, busy: false } };
@@ -259,6 +288,9 @@ function onServer(state: State, msg: ServerMsg): State {
 
     case 'history':
       return mergeHistory(state, msg, Boolean(msg.before_id));
+
+    case 'unread':
+      return { ...state, unreadPending: msg.unread_items ?? [] };
 
     case 'todos':
       return { ...state, todos: (msg.items ?? []) as TodoItem[] };
@@ -422,6 +454,7 @@ export function initialState(): State {
     includePrivate: false,
     help: false,
     latency: { ms: null, at: null },
+    unreadPending: [],
     prependToken: 0,
     bottomToken: 0,
     todosDirty: 0,

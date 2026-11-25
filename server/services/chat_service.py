@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple
 
 from server import config
 from server.agent import agent_core
-from server.console import log_chat
+from server.console import log_chat, log_line
 from server.models import Message
 from server.services.context import RequestContext, err
 from server.storage import chat_history
@@ -48,8 +48,10 @@ class ChatService:
     @staticmethod
     def agent_room_id(user_id: str) -> int:
         """每个用户自己与 Agent 的私聊房间：只有本人能读写，别人（含别人的 Agent 任务）碰不到。"""
-        return chat_history.ensure_room(
+        room_id = chat_history.ensure_room(
             f"agent:{user_id}", room_type="private", owner_id=user_id)
+        chat_history.join_room(room_id, user_id)
+        return room_id
 
     # ---------------------------------------------------------------- 群聊/私聊
     @staticmethod
@@ -146,7 +148,11 @@ class ChatService:
 
     @classmethod
     def _pm_room(cls, a: str, b: str) -> int:
-        return chat_history.ensure_room(cls._pm_name(a, b), room_type="private", owner_id=a)
+        room_id = chat_history.ensure_room(cls._pm_name(a, b), room_type="private", owner_id=a)
+        # 双方都登记成成员，登录时才知道"我参与过哪些私聊"，用来算离线未读
+        chat_history.join_room(room_id, a)
+        chat_history.join_room(room_id, b)
+        return room_id
 
     # ---------------------------------------------------------------- Agent
     def handle_agent(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
@@ -344,6 +350,25 @@ class ChatService:
         return {"type": "history", "target": target or None, "items": items,
                 "agent": bool(msg.get("agent")),
                 "before_id": before_id, "more": len(rows) >= chat_history._clamp(limit)}
+
+    def handle_read(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
+        """已读回执：客户端把"我看到的最后一条 id"报上来，下次登录就不算它未读了。"""
+        need = ctx.require_login()
+        if need:
+            return need
+        try:
+            if msg.get("agent"):
+                room_id = self.agent_room_id(ctx.user_id)
+            else:
+                target = (msg.get("target") or "").strip()
+                room_id = (chat_history.room_id_by_name(self._pm_name(ctx.user_id, target))
+                           if target else ctx.room_id)
+            if room_id is None:
+                return None
+            chat_history.mark_read(room_id, ctx.user_id, msg.get("id"))
+        except Exception as e:
+            log_line(f"[Read] 标记已读失败 {ctx.user_id}: {e}")
+        return None
 
     def handle_todos(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
         need = ctx.require_login()

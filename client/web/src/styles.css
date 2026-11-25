@@ -523,6 +523,35 @@ textarea {
   background: var(--rule);
 }
 
+/* 离线未读分界线 */
+.offline-line {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  color: var(--ok);
+  font: 400 10px/1.6 var(--mono);
+  letter-spacing: 0.12em;
+}
+
+.offline-line::before,
+.offline-line::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--ok) 0 4px,
+    transparent 4px 8px
+  );
+  opacity: 0.5;
+}
+
+.offline-line span {
+  flex: none;
+}
+
 .empty {
   flex: none;
   margin: auto 0;

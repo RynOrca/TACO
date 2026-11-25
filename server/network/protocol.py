@@ -48,6 +48,8 @@ TYPE_CODE = {
     "todos": 11,
     "history": 12,
     "autosummary": 13,
+    "read": 14,
+    "unread": 15,
 }
 
 CODE_TYPE = {code: name for name, code in TYPE_CODE.items()}

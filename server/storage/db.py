@@ -54,6 +54,15 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_msg_room_time ON messages(room_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_msg_sender    ON messages(sender);
 
+CREATE TABLE IF NOT EXISTS room_reads (
+    room_id      INTEGER NOT NULL,
+    user_id      TEXT NOT NULL,
+    last_read_id INTEGER NOT NULL DEFAULT 0,
+    updated_at   TEXT NOT NULL,
+    PRIMARY KEY (room_id, user_id),
+    FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS todos (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     room_id    INTEGER NOT NULL,

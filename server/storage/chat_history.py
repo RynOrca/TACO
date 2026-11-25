@@ -4,6 +4,7 @@
 
 # 不会，让ai写；内容教学放到docs/内
 
+import sqlite3
 from typing import List,Optional
 from server.storage.db import get_conn, transaction,now_iso,row_to_message
 from server.models import Message
@@ -138,6 +139,67 @@ def search_history(room_id: int, keywords: List[str], limit: int = 20) -> List[M
         [int(room_id)] + like_params + like_params + [limit],
     ).fetchall()
     return [row_to_message(r) for r in rows]
+
+
+def mark_read(room_id: int, user_id: str, upto_id: Optional[int] = None) -> int:
+    """把"我读到哪"往前推。只前进不后退，避免乱序请求把水位拉回去。"""
+    room_id = _require_room(room_id)
+    if upto_id is None:
+        row = get_conn().execute(
+            "SELECT COALESCE(MAX(id), 0) AS m FROM messages WHERE room_id = ?", (room_id,)
+        ).fetchone()
+        upto_id = row["m"] if row else 0
+    upto_id = max(0, int(upto_id))
+    with transaction() as tx:
+        tx.execute(
+            """INSERT INTO room_reads (room_id, user_id, last_read_id, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(room_id, user_id) DO UPDATE
+                 SET last_read_id = MAX(last_read_id, excluded.last_read_id),
+                     updated_at   = excluded.updated_at""",
+            (room_id, user_id, upto_id, now_iso()),
+        )
+    return upto_id
+
+
+def rooms_for_user(user_id: str) -> List[sqlite3.Row]:
+    """我在哪些房间里：主群 + 我自己的 Agent 房间 + 我参与的私聊。"""
+    return get_conn().execute(
+        """SELECT r.room_id, r.name, r.room_type
+           FROM rooms r JOIN room_members m ON m.room_id = r.room_id
+           WHERE m.user_id = ?
+           ORDER BY r.room_id""",
+        (user_id,),
+    ).fetchall()
+
+
+def unread_items(user_id: str) -> List[dict]:
+    """每个房间"上次读过之后、别人发的"有多少条。"""
+    rows = get_conn().execute(
+        """SELECT r.room_id, r.name, r.room_type,
+                  COALESCE(rr.last_read_id, 0) AS last_read_id,
+                  (SELECT COUNT(*) FROM messages m
+                    WHERE m.room_id = r.room_id
+                      AND m.id > COALESCE(rr.last_read_id, 0)
+                      AND m.sender <> ?) AS unread,
+                  (SELECT COALESCE(MAX(id), 0) FROM messages m2 WHERE m2.room_id = r.room_id) AS max_id
+           FROM rooms r
+           JOIN room_members m ON m.room_id = r.room_id AND m.user_id = ?
+           LEFT JOIN room_reads rr ON rr.room_id = r.room_id AND rr.user_id = ?
+           ORDER BY r.room_id""",
+        (user_id, user_id, user_id),
+    ).fetchall()
+    return [
+        {
+            "room": row["name"],
+            "room_id": row["room_id"],
+            "unread": row["unread"],
+            "last_read_id": row["last_read_id"],
+            "max_id": row["max_id"],
+        }
+        for row in rows
+        if row["unread"] > 0
+    ]
 
 
 def count_messages(room_id: int) -> int:

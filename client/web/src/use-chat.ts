@@ -252,6 +252,28 @@ export function useChat(): Chat {
     requestHistory(state.active, false);
   }, [state.me, send, requestHistory]);
 
+  // 已读回执：把"我看到的最后一条"报给服务端，下次登录就不会再算离线未读
+  const readMark = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!state.me) return;
+    const thread = state.active;
+    const ids = (state.threads[thread]?.events ?? [])
+      .map((e) => e.id)
+      .filter((id): id is number => typeof id === 'number');
+    if (!ids.length) return;
+    const upto = Math.max(...ids);
+    if (readMark.current[thread] === upto) return;
+    readMark.current[thread] = upto;
+
+    const timer = window.setTimeout(() => {
+      const payload: SendMsg = { type: 'read', id: upto };
+      if (thread === AGENT) payload.agent = true;
+      else if (thread.startsWith('pm:')) payload.target = threadUser(thread);
+      send(payload);
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [state.me, state.active, state.threads, send]);
+
   // 延迟监测：每 5 秒 ping 一次，15 秒没有 pong 就当超时
   useEffect(() => {
     if (state.link !== 'open') {
