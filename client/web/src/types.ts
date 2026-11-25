@@ -45,6 +45,8 @@ export interface ServerMsg {
   unread_items?: UnreadItem[];
   /** recall 撤回：id 指向被撤回的那条消息 */
   room_id?: number;
+  /** group 消息里的 @提及（只含真实存在的用户名） */
+  mentions?: string[];
 }
 
 export interface HistoryItem {
@@ -97,9 +99,13 @@ export interface ChatEvent {
   scheduled?: boolean;
   /** 这条是自己发给 Agent 的提问，界面上加一条灰色备注 */
   agentScope?: 'private' | 'group';
+  /** 这条消息 @了谁 */
+  mentions?: string[];
 }
 
 export interface UnreadItem {
+  /** 其中有多少条 @了我 */
+  mentions?: number;
   /** 房间名：main / agent:alice / pm:a:b */
   room: string;
   room_id: number;
@@ -116,8 +122,10 @@ export interface ThreadState {
   more: boolean;
   loading: boolean;
   unread: number;
+  /** 未读里有没有 @我：徽标显示成 @ 而不是数字 */
+  mentioned: boolean;
   /** 离线未读：登录时服务端告诉我"上次读到 id"，历史里在这之后插一条分界线 */
-  offline?: { count: number; sinceId: number };
+  offline?: { count: number; sinceId: number; mentions?: number };
 }
 
 export const MAIN = 'main';

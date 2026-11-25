@@ -66,6 +66,7 @@ const emptyThread = (): ThreadState => ({
   more: false,
   loading: false,
   unread: 0,
+  mentioned: false,
 });
 
 let seq = 0;
@@ -244,7 +245,12 @@ function onServer(state: State, msg: ServerMsg): State {
             threads[key] = {
               ...thread,
               unread: item.unread,
-              offline: { count: item.unread, sinceId: item.last_read_id },
+              mentioned: (item.mentions ?? 0) > 0,
+              offline: {
+                count: item.unread,
+                sinceId: item.last_read_id,
+                mentions: item.mentions ?? 0,
+              },
             };
           }
           next = { ...next, threads, unreadPending: [] };
@@ -261,7 +267,12 @@ function onServer(state: State, msg: ServerMsg): State {
       const event = makeEvent(ask ? 'ask' : 'group', msg.sender || '?', msg.msg ?? '', msg.id);
       if (ask) event.agentScope = 'group';
       applyExtras(event, msg);
-      return appendEvent(state, MAIN, event, state.active === MAIN);
+      if (msg.mentions?.length) event.mentions = msg.mentions;
+      const next = appendEvent(state, MAIN, event, state.active === MAIN);
+      // 别人在群里 @我、而我没在看这个会话 → 徽标换成 @
+      const met = Boolean(state.me) && (msg.mentions ?? []).includes(state.me!);
+      if (!met || state.active === MAIN) return next;
+      return withThread(next, MAIN, (thread) => ({ ...thread, mentioned: true }));
     }
 
     case 'agent_ask': {
@@ -384,9 +395,10 @@ export function reducer(state: State, action: Action): State {
     case 'switch': {
       if (action.thread === state.active) return state;
       const thread = state.threads[action.thread];
-      const threads = thread && thread.unread
-        ? { ...state.threads, [action.thread]: { ...thread, unread: 0 } }
-        : state.threads;
+      const threads =
+        thread && (thread.unread || thread.mentioned)
+          ? { ...state.threads, [action.thread]: { ...thread, unread: 0, mentioned: false } }
+          : state.threads;
       return { ...state, active: action.thread, threads, bottomToken: state.bottomToken + 1 };
     }
 

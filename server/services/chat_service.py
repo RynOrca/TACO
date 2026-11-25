@@ -17,6 +17,8 @@ from server.storage.db import parse_ts
 MAX_MSG_LEN = 2000
 # 撤回时限：超过这个秒数就不让撤了，避免翻旧账
 RECALL_WINDOW_SECONDS = 120
+# 用户名允许的字符，@提及从这里切
+MENTION_RE = re.compile(r"@([\w一-龥-]{1,32})")
 # 图片文件名由图片服务生成：32 位十六进制 + 白名单后缀，客户端改不了路径
 IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{32}\.(?:jpg|jpeg|png|gif|webp)$")
 
@@ -93,10 +95,16 @@ class ChatService:
         log_chat("群聊", ctx.user_id, f"[图片 {image}]" if image else content,
                  ctx.room_id, "main", ctx.addr)
 
+        # @提及：只认真实存在的用户名，前端据此高亮/提醒被提到的人
+        mentions = [n for n in dict.fromkeys(MENTION_RE.findall(content or ""))
+                    if n != ctx.user_id and chat_history.get_user(n) is not None]
+
         payload = {
             "type": "group", "sender": ctx.user_id, "id": mid,
             "msg": "[图片]" if image else content,
         }
+        if mentions:
+            payload["mentions"] = mentions
         if image:
             payload["msg_type"] = "image"
             payload["image"] = image

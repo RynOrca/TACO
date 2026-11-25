@@ -59,6 +59,7 @@ export default function App() {
           thread={state.active}
           target={target}
           isPM={isPM}
+          members={[...state.online.filter((u) => u !== state.me), 'Agent']}
           disabled={!state.me || state.link !== 'open'}
           onSend={chat.sendText}
           onImage={chat.sendImage}

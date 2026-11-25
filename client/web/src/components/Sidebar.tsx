@@ -22,9 +22,11 @@ export function Sidebar({
   onReconnect: () => void;
 }) {
   const mainPreview = previewOf(state, MAIN);
-  const mainUnread = threadOf(state, MAIN).unread;
+  const mainThread = threadOf(state, MAIN);
+  const mainUnread = mainThread.unread;
   const agentPreview = previewOf(state, AGENT);
-  const agentUnread = threadOf(state, AGENT).unread;
+  const agentThread = threadOf(state, AGENT);
+  const agentUnread = agentThread.unread;
   const pmUsers = pmUsersOf(state);
 
   return (
@@ -60,7 +62,11 @@ export function Sidebar({
           </span>
           <span className="meta">
             <span className="tm">{mainPreview.time}</span>
-            {mainUnread > 0 && <span className="pill">{mainUnread}</span>}
+            {mainUnread > 0 && (
+              <span className={`pill${mainThread.mentioned ? ' at' : ''}`}>
+                {mainThread.mentioned ? '@' : mainUnread}
+              </span>
+            )}
           </span>
         </button>
       </div>
@@ -79,14 +85,19 @@ export function Sidebar({
           </span>
           <span className="meta">
             <span className="tm">{agentPreview.time}</span>
-            {agentUnread > 0 && <span className="pill">{agentUnread}</span>}
+            {agentUnread > 0 && (
+              <span className={`pill${agentThread.mentioned ? ' at' : ''}`}>
+                {agentThread.mentioned ? '@' : agentUnread}
+              </span>
+            )}
           </span>
         </button>
         {pmUsers.length === 0 && <p className="list-empty">暂时没有其他人在线</p>}
         {pmUsers.map((user) => {
           const key = pmThread(user);
           const preview = previewOf(state, key);
-          const unread = threadOf(state, key).unread;
+          const t = threadOf(state, key);
+          const unread = t.unread;
           const online = state.online.includes(user);
           return (
             <button
@@ -102,7 +113,9 @@ export function Sidebar({
               </span>
               <span className="meta">
                 <span className="tm">{preview.time}</span>
-                {unread > 0 && <span className="pill">{unread}</span>}
+                {unread > 0 && (
+                  <span className={`pill${t.mentioned ? ' at' : ''}`}>{t.mentioned ? '@' : unread}</span>
+                )}
               </span>
             </button>
           );

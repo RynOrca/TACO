@@ -209,18 +209,24 @@ def unread_items(user_id: str) -> List[dict]:
                     WHERE m.room_id = r.room_id
                       AND m.id > COALESCE(rr.last_read_id, 0)
                       AND m.sender <> ?) AS unread,
+                  (SELECT COUNT(*) FROM messages m3
+                    WHERE m3.room_id = r.room_id
+                      AND m3.id > COALESCE(rr.last_read_id, 0)
+                      AND m3.sender <> ?
+                      AND instr(m3.content, '@' || ?) > 0) AS mentions,
                   (SELECT COALESCE(MAX(id), 0) FROM messages m2 WHERE m2.room_id = r.room_id) AS max_id
            FROM rooms r
            JOIN room_members m ON m.room_id = r.room_id AND m.user_id = ?
            LEFT JOIN room_reads rr ON rr.room_id = r.room_id AND rr.user_id = ?
            ORDER BY r.room_id""",
-        (user_id, user_id, user_id),
+        (user_id, user_id, user_id, user_id, user_id),
     ).fetchall()
     return [
         {
             "room": row["name"],
             "room_id": row["room_id"],
             "unread": row["unread"],
+            "mentions": row["mentions"],
             "last_read_id": row["last_read_id"],
             "max_id": row["max_id"],
         }

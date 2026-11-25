@@ -28,7 +28,7 @@ function StepRow({ step, index }: { step: ToolStep; index: number }) {
   );
 }
 
-function AgentCard({ event }: { event: ChatEvent }) {
+function AgentCard({ event, me }: { event: ChatEvent; me: string | null }) {
   const pending = event.status === 'pending';
   const steps = event.steps ?? [];
   const known = event.steps !== undefined;
@@ -62,14 +62,22 @@ function AgentCard({ event }: { event: ChatEvent }) {
       )}
       {!pending && (
         <div className="agent-out">
-          <RichText text={event.text} />
+          <RichText text={event.text} me={me} />
         </div>
       )}
     </div>
   );
 }
 
-function Body({ event, imageBase }: { event: ChatEvent; imageBase: string }) {
+function Body({
+  event,
+  imageBase,
+  me,
+}: {
+  event: ChatEvent;
+  imageBase: string;
+  me: string | null;
+}) {
   if (event.image) {
     return (
       <figure className="pic">
@@ -87,7 +95,7 @@ function Body({ event, imageBase }: { event: ChatEvent; imageBase: string }) {
   }
   return (
     <div className="body">
-      <RichText text={event.text} />
+      <RichText text={event.text} me={me} />
     </div>
   );
 }
@@ -152,9 +160,9 @@ export function Message({
         </header>
 
         {agent ? (
-          <AgentCard event={event} />
+          <AgentCard event={event} me={me} />
         ) : (
-          <Body event={event} imageBase={imageBase} />
+          <Body event={event} imageBase={imageBase} me={me} />
         )}
 
         {cont.map((item, i) => {
@@ -162,7 +170,7 @@ export function Message({
           const repeat = (i > 0 ? cont[i - 1].time : event.time) === item.time;
           return (
             <div className="cont" key={item.key}>
-              <Body event={item} imageBase={imageBase} />
+              <Body event={item} imageBase={imageBase} me={me} />
               <time className="tm" title={stampTitle(item)} data-repeat={repeat || undefined}>
                 {repeat ? '' : item.time}
               </time>

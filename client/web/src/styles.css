@@ -276,6 +276,68 @@ textarea {
   font: 400 9.5px/1 var(--mono);
 }
 
+/* 有人 @我：徽标换成 @，用荧光色挑出来 */
+.pill.at {
+  background: var(--accent);
+  color: var(--ink);
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
+
+/* @提及高亮 */
+.mention {
+  padding: 0 3px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--rule-strong);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.mention.me {
+  background: var(--accent);
+  border-bottom-color: var(--ink);
+}
+
+.mine .mention {
+  background: rgba(205, 242, 63, 0.65);
+}
+
+/* @ 补全菜单 */
+.mention-menu {
+  position: absolute;
+  left: 11px;
+  bottom: calc(100% + 6px);
+  z-index: 25;
+  width: 200px;
+  padding: 4px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  box-shadow: 4px 4px 0 rgba(16, 15, 13, 0.12);
+}
+
+.mention-menu button {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: 400 11.5px/1.6 var(--mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mention-menu button.on {
+  background: var(--accent);
+}
+
+.mention-hint {
+  display: block;
+  padding: 4px 8px 2px;
+  color: var(--faint);
+  font: 400 9.5px/1.5 var(--mono);
+}
+
 .ava {
   width: 28px;
   height: 28px;
@@ -912,6 +974,7 @@ textarea {
 }
 
 .box {
+  position: relative;
   border: 1px solid var(--ink);
   background: var(--surface);
   padding: 9px 11px 8px;
