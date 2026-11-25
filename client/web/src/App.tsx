@@ -75,6 +75,10 @@ export default function App() {
         onGameMove={chat.gameMove}
         onGameStart={chat.gameStart}
         onGameQuit={chat.gameQuit}
+        onGameInvite={chat.gameInvite}
+        onGameAccept={chat.gameAccept}
+        onGameDecline={chat.gameDecline}
+        onGameFocus={chat.gameFocus}
       />
 
       {state.auth.open && (

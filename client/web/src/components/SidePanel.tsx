@@ -18,6 +18,10 @@ export function SidePanel({
   onGameMove,
   onGameStart,
   onGameQuit,
+  onGameInvite,
+  onGameAccept,
+  onGameDecline,
+  onGameFocus,
 }: {
   state: State;
   askAgent: (question: string, scope: 'private' | 'group') => void;
@@ -27,9 +31,21 @@ export function SidePanel({
   onGameMove: (cell: number) => void;
   onGameStart: () => void;
   onGameQuit: () => void;
+  onGameInvite: (target: string) => void;
+  onGameAccept: () => void;
+  onGameDecline: () => void;
+  onGameFocus: (id: string) => void;
 }) {
   const auto = state.autoSummary;
   const members = [...state.online];
+  const allGames = Object.values(state.games);
+  const mineGame =
+    allGames.find(
+      (g) => state.me && (g.players.X === state.me || g.players.O === state.me),
+    ) ?? null;
+  const focusedGame = state.gameFocus ? state.games[state.gameFocus] ?? null : null;
+  const ongoingGames = allGames.filter((g) => !g.over);
+  const others = members.filter((u) => u !== state.me);
   const mainCount = threadOf(state, MAIN).events.filter((e) => e.kind === 'group').length;
   const todos = state.todos.slice(0, 6);
 
@@ -61,10 +77,17 @@ export function SidePanel({
       </section>
 
       <GamePanel
-        game={state.game}
+        mine={mineGame}
+        focused={focusedGame}
+        ongoing={ongoingGames}
+        invite={state.gameInvite}
+        me={state.me}
         onMove={onGameMove}
         onStart={onGameStart}
         onQuit={onGameQuit}
+        onFocus={onGameFocus}
+        onAccept={onGameAccept}
+        onDecline={onGameDecline}
       />
 
       <section>
@@ -95,6 +118,19 @@ export function SidePanel({
             </div>
           );
         })}
+      </section>
+
+      <section>
+        <h2>找人下棋</h2>
+        {others.length === 0 && <p className="panel-empty">当前没有其他在线成员</p>}
+        <div className="auto-btns">
+          {others.map((user) => (
+            <button type="button" key={user} onClick={() => onGameInvite(user)}>
+              邀请 {user}
+            </button>
+          ))}
+        </div>
+        <p className="auto-hint">对方接受后即可对弈，其他人右栏可以直接观战</p>
       </section>
 
       <section>

@@ -42,12 +42,16 @@ SUMMARY_PROMPT = (
     "只依据工具读到的群聊内容，不要编造。"
 )
 
-GAME_HELP = (
-    "井字棋：你和 Agent 对弈，你执 X 先手。\n"
-    "/game start 开一局\n"
-    "/game move 5 把棋子下在第 5 格（1-9 从左到右、从上到下）\n"
-    "/game board 看当前棋盘　/game status 看战绩　/game quit 退出"
-)
+GAME_HELP = chr(10).join((
+    "井字棋：",
+    "  /game start            和 Agent 下一局（你执 X 先手）",
+    "  /game invite 用户名     邀请另一位成员对弈（对方 /game accept 接受）",
+    "  /game accept | decline  接受 / 拒绝邀请",
+    "  /game move 5           下在第 5 格（1-9，从左到右、从上到下）",
+    "  /game watch            观战所有进行中的对局",
+    "  /game board | status   看当前棋盘 / 看战绩",
+    "  /game quit             退出对局（人对人时判对方胜）",
+))
 
 
 def validate_attachment(value) -> Optional[str]:
@@ -515,28 +519,50 @@ class ChatService:
         return {"type": "system", "msg": f"{ctx.user_id} 开启了 Agent 定时总结：每 {minutes} 分钟一次"}
 
     # ---------------------------------------------------------------- 井字棋
-    def _game_state(self, user_id: str, game) -> dict:
-        """给前端渲染可点击棋盘用的结构化状态（只发给下棋的本人）。"""
+    def _spectators(self, game) -> int:
+        """观战人数 = 在线人数 - 这盘的两个玩家。"""
+        online = set(self.users.online_users())
+        players = {u for u in (game.x_user, game.o_user) if u}
+        return max(0, len(online - players))
+
+    def _game_state(self, game) -> dict:
+        """结构化棋局状态。广播给房间里所有人：参与者能点，其他人只读。"""
+        snap = game.snapshot()
+        snap["game_id"] = snap.pop("id")
         return {
             "type": "game",
             "action": "state",
-            "user": user_id,
-            "board": list(game.board),
-            "turn": game.turn,
-            "over": game.over,
-            "result": game.result,
-            "score": self.games.score(user_id),
+            **snap,
+            "spectators": self._spectators(game),
+            "scores": {u: self.games.score(u) for u in (game.x_user, game.o_user) if u},
         }
 
-    def _game_status(self, game) -> str:
-        whose = "轮到你（X）" if game.turn == "X" else "Agent 思考中（O）"
-        return f"{game.render()}\n{whose}　{self.games.score_text(game.user_id)}"
+    @staticmethod
+    def _game_result_text(game) -> str:
+        if game.result == "draw":
+            return "平局"
+        return f"{game.players()[game.winner]} 获胜"
+
+    def _game_line(self, game, note: str = "") -> str:
+        players = game.players()
+        head = f"[井字棋] {players['X']} vs {players['O']}"
+        if note:
+            head += f" · {note}"
+        if game.over:
+            return f"{head} · 结果：{self._game_result_text(game)}"
+        return f"{head} · 轮到 {players[game.turn]}"
+
+    def _push_game(self, game, note: str = "", announce: bool = True) -> None:
+        """推棋局状态给所有人，再补一行简短提示（不打整个棋谱，免得刷屏）。"""
+        self.users.broadcast(self._game_state(game))
+        if announce:
+            self.users.broadcast({"type": "system", "msg": self._game_line(game, note)})
 
     def handle_game(self, ctx: RequestContext, msg: dict) -> Optional[dict]:
         need = ctx.require_login()
         if need:
             return need
-        # 禁言是"不能发言"，下棋也算发言（会在群里广播棋谱），一并拦掉
+        # 禁言是"不能发言"，下棋会在群里广播，一并拦掉
         muted = self.mute_block(ctx)
         if muted:
             return muted
@@ -547,77 +573,168 @@ class ChatService:
         rest = rest.strip()
 
         if not action or action == "help":
-            game = self.games.get(ctx.user_id)
+            game = self.games.current(ctx.user_id)
             if game is None:
                 return {"type": "system", "msg": GAME_HELP}
-            ctx.send(self._game_state(ctx.user_id, game))   # 刷新过页面也能把面板拉回来
-            return {"type": "system", "msg": self._game_status(game)}
+            ctx.send(self._game_state(game))
+            return {"type": "system", "msg": self._game_line(game)}
 
+        # ---------------- 跟 Agent 开一局 ----------------
         if action == "start":
-            current = self.games.get(ctx.user_id)
+            self.games.prune()
+            # 上一局已经结束（还留着给双方看结果）：开新局时清掉
+            for finished in self.games.finished_for(ctx.user_id):
+                self._close_game(finished)
+            current = self.games.current(ctx.user_id)
             if current is not None and not current.over:
-                ctx.send(self._game_state(ctx.user_id, current))
+                ctx.send(self._game_state(current))
                 return {"type": "system",
-                        "msg": "你还有一局没下完：\n" + self._game_status(current)}
-            game = self.games.start(ctx.user_id)
-            self.users.broadcast({"type": "system", "msg": (
-                f"[井字棋] {ctx.user_id} 开局，执 X 先手。\n{game.render()}\n"
-                "输入 /game move 5 落子。")})
-            ctx.send(self._game_state(ctx.user_id, game))
+                        "msg": "你还有一局没下完：\n" + self._game_line(current)}
+            game = self.games.start_vs_agent(ctx.user_id, ctx.room_id)
+            self._push_game(game, note=f"{ctx.user_id} 开局，执 X 先手（对手：Agent）")
             return None
 
+        # ---------------- 邀请另一位成员 ----------------
+        if action == "invite":
+            self.games.prune()
+            target = rest.strip()
+            if not target:
+                return err("BAD_PARAM", "用法：/game invite 用户名")
+            if chat_history.get_user(target) is None:
+                return err("NOT_FOUND", f"用户 {target} 不存在")
+            if not self.users.is_online(target):
+                return err("USER_OFFLINE", f"{target} 不在线，等他上线再邀请")
+            ok, detail = self.games.invite(ctx.user_id, target)
+            if not ok:
+                return err("BAD_GAME", detail)
+            self.users.send_to(target, {
+                "type": "game", "action": "invite", "game_id": "",
+                "from": ctx.user_id, "ttl": game_service.INVITE_TTL_SECONDS,
+            })
+            return {"type": "system", "msg": f"[井字棋] {detail}，对方发 /game accept 即可开局"}
+
+        if action in ("accept", "decline"):
+            pending = self.games.pending_invite(ctx.user_id)
+            if pending is None:
+                return err("NO_INVITE", "没有待处理的邀请（可能已过期）")
+            inviter = pending["from"]
+            if action == "decline":
+                self.games.decline(ctx.user_id)
+                self.users.send_to(inviter, {
+                    "type": "system", "msg": f"[井字棋] {ctx.user_id} 拒绝了你的邀请"})
+                return {"type": "system", "msg": "已拒绝邀请"}
+            ok, detail, game = self.games.accept(ctx.user_id)
+            if not ok or game is None:
+                return err("BAD_GAME", detail)
+            self._push_game(game, note=f"{inviter}（X）vs {ctx.user_id}（O）开局")
+            self.users.send_to(inviter, {"type": "system", "msg": f"[井字棋] {detail}"})
+            return {"type": "system", "msg": detail}
+
+        # ---------------- 落子 ----------------
         if action == "move":
-            game = self.games.get(ctx.user_id)
+            game = self.games.current(ctx.user_id)
             if game is None:
-                return err("NO_GAME", "还没有对局，先发 /game start")
+                return err("NO_GAME", "你当前没有进行中的对局，先 /game start 或 /game invite 用户名")
             try:
                 cell = int(rest)
             except (TypeError, ValueError):
                 return err("BAD_MOVE", "用法：/game move 5（1-9）")
-            ok, detail = game.move(cell, "X")
+            ok, detail = game.move(cell, user_id=ctx.user_id)
             if not ok:
                 return err("BAD_MOVE", detail)
 
+            self._push_game(game, note=f"{ctx.user_id} 下在 {cell}")
             if game.over:
-                self.games.record(game)
-                ctx.send(self._game_state(ctx.user_id, game))
-                self.users.broadcast({"type": "system", "msg": (
-                    f"[井字棋] {ctx.user_id} 下在 {cell}。\n{game.render()}\n"
-                    f"结果：{game_service.RESULT_CN[game.result]}\n"
-                    f"{self.games.score_text(ctx.user_id)}")})
-                self.games.drop(ctx.user_id)
-                return None
-
-            self.users.broadcast({"type": "system", "msg": (
-                f"[井字棋] {ctx.user_id} 下在 {cell}，Agent 思考中…\n{game.render()}")})
-            ctx.send(self._game_state(ctx.user_id, game))
-            self._agent_pool.submit(self._game_agent_task, ctx.user_id, game)
+                self._finish_game(game)
+            elif game.vs_agent and game.turn == "O":
+                self._agent_pool.submit(self._game_agent_task, ctx.user_id, game)
             return None
 
+        # ---------------- 观战 / 查询 ----------------
+        if action == "watch":
+            ongoing = self.games.ongoing()
+            if not ongoing:
+                return {"type": "system", "msg": "当前没有进行中的对局可观战。"}
+            for game in ongoing:
+                ctx.send(self._game_state(game))
+            lines = ["进行中的对局："] + [self._game_line(g) for g in ongoing]
+            lines.append("右栏棋盘可以直接看，观战时不能落子。")
+            return {"type": "system", "msg": "\n".join(lines)}
+
         if action == "board":
-            game = self.games.get(ctx.user_id)
+            game = self.games.current(ctx.user_id)
             if game is None:
                 return {"type": "system", "msg": "当前没有进行中的对局。\n" + GAME_HELP}
-            ctx.send(self._game_state(ctx.user_id, game))
-            return {"type": "system", "msg": self._game_status(game)}
+            ctx.send(self._game_state(game))
+            return {"type": "system", "msg": self._game_line(game)}
 
         if action == "status":
-            game = self.games.get(ctx.user_id)
+            game = self.games.current(ctx.user_id)
             head = self.games.score_text(ctx.user_id)
             if game is not None:
-                ctx.send(self._game_state(ctx.user_id, game))
-                return {"type": "system", "msg": head + "\n" + self._game_status(game)}
+                ctx.send(self._game_state(game))
+                return {"type": "system", "msg": head + "\n" + self._game_line(game)}
             return {"type": "system", "msg": head + "\n当前没有进行中的对局。"}
 
         if action == "quit":
-            game = self.games.drop(ctx.user_id)
+            game = self.games.current(ctx.user_id)
+            if game is not None and game.over:
+                self._close_game(game)
+                return {"type": "system", "msg": "已关闭上一局。"}
             if game is None:
                 return {"type": "system", "msg": "当前没有进行中的对局。"}
-            ctx.send({"type": "game", "action": "closed"})
-            return {"type": "system", "msg": (
-                f"{ctx.user_id} 退出了井字棋。{self.games.score_text(ctx.user_id)}")}
+            if not game.over and not game.vs_agent and game.forfeit(ctx.user_id):
+                # 人对人中途退出：判对方胜，棋局留给双方看结果
+                self.games.record(game)
+                self._push_game(game, note=f"{ctx.user_id} 退出了对局")
+                self._close_game(game)
+            else:
+                self.users.broadcast({"type": "game", "action": "closed", "game_id": game.id})
+                self.games.drop(ctx.user_id)
+                self.users.broadcast({"type": "system", "msg": (
+                    f"[井字棋] {ctx.user_id} 退出了对局。{self.games.score_text(ctx.user_id)}")})
+            return None
 
-        return err("BAD_GAME", "用法：/game start|move 5|board|status|quit")
+        return err("BAD_GAME",
+                   "用法：/game start | invite 用户名 | accept | decline | "
+                   "move 5 | watch | board | status | quit")
+
+    def _finish_game(self, game) -> None:
+        """收尾：记战绩、广播最终棋盘。
+
+        这里故意不发 closed：客户端要留着棋盘给双方看结果，等他们开新局或点"关闭"再清。
+        """
+        if not game.over:
+            return
+        self.games.record(game)
+        self._push_game(game, note="本局结束")
+        self.games.release(game)
+
+    def _close_game(self, game) -> None:
+        for player in (game.x_user, game.o_user):
+            if player:
+                self.games.drop(player)
+        self.users.broadcast({"type": "game", "action": "closed", "game_id": game.id})
+
+    def handle_disconnect(self, user_id: str) -> None:
+        """连接断开（主动退出或被心跳回收）：对局里的一方掉线，判对方胜。"""
+        if not user_id or self.users.is_online(user_id):
+            return          # 换号登录/多端登录：这个人还在线，别动他的棋局
+        self.games.clear_invites(user_id)
+        game = self.games.current(user_id)
+        if game is None or game.over:
+            return
+        if game.vs_agent:
+            self.games.drop(user_id)
+            self.users.broadcast({"type": "game", "action": "closed", "game_id": game.id})
+            self.users.broadcast({"type": "system", "msg": (
+                f"[井字棋] {user_id} 掉线，对局已取消" )})
+            return
+        if game.forfeit(user_id):
+            self.games.record(game)
+            self._push_game(game, note=f"{user_id} 掉线，判负")
+            self._close_game(game)
+            log_line(f"[Game] {user_id} 掉线，对局 {game.id} 判负收尾")
 
     def _game_agent_task(self, user_id: str, game) -> None:
         """Agent 的一轮：读棋盘、用 game_move 落子、点评一句。"""
@@ -640,7 +757,7 @@ class ChatService:
         if game.cancelled:
             return
 
-        # 模型没落子（或着法非法又没纠正）时，用本地 minimax 兜底，别把棋局卡死
+        # 模型没落子（或着法非法又没纠正）时用本地 minimax 兜底，别把棋局卡死
         fallback = False
         if not game.over and game.turn == "O":
             cell = game.auto_move()
@@ -650,11 +767,11 @@ class ChatService:
 
         text = _clamp_reply((reply or "").strip())
         if game.over:
-            text += f"\n结果：{game_service.RESULT_CN[game.result]}"
+            text += f"\n结果：{self._game_result_text(game)}"
         text = f"{text}\n\n{game.render()}"
 
-        # 先推结构化状态，让前端棋盘立刻反映出 O 的落子
-        self.users.send_to(user_id, self._game_state(user_id, game))
+        # 先推状态，再广播 Agent 的点评
+        self._push_game(game, announce=False)
 
         payload = {"type": "agent", "sender": "Agent", "msg": text,
                    "status": "done", "steps": steps, "scope": "group"}
@@ -666,13 +783,10 @@ class ChatService:
         self.users.broadcast(payload)
 
         if game.over:
-            self.games.record(game)
-            self.games.drop(user_id)
-            self.users.broadcast({"type": "system", "msg": (
-                f"[井字棋] 本局结束：{game_service.RESULT_CN[game.result]}　"
-                f"{self.games.score_text(user_id)}")})
+            self._finish_game(game)
         elif fallback:
             log_line(f"[Game] {user_id} 的对局由本地策略代打了一步")
+            self.users.broadcast({"type": "system", "msg": self._game_line(game, "Agent 落子")})
 
     # ---------------------------------------------------------------- 定时任务
     def handle_task(self, ctx: RequestContext, msg: dict) -> Optional[dict]:

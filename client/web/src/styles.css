@@ -1817,6 +1817,116 @@ textarea {
   color: var(--warn);
 }
 
+/* 邀请卡片：被邀请人侧栏顶部 */
+.game-invite {
+  margin: 0 0 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--ink);
+  background: var(--accent-tint);
+}
+
+.game-invite p {
+  margin: 0 0 7px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.game-invite-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.game-invite-btns .btn {
+  flex: 1;
+  padding: 3px 8px;
+  text-align: center;
+}
+
+/* 标题里的 "A vs B · N 人观战" */
+.game-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: var(--mono);
+}
+
+.game-title em {
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--faint);
+  text-transform: none;
+}
+
+/* 观战：只读标记 + 灰一点的棋盘 */
+.game-spectate {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--rule-strong);
+  color: var(--faint);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.game-board .game-cell.spectate {
+  cursor: default;
+}
+
+.game-board .game-cell.spectate:hover {
+  background: var(--surface);
+}
+
+.game-board .game-cell.spectate:not(:disabled) {
+  border-color: var(--ink);
+}
+
+/* 多盘同时进行时的切换列表 */
+.game-list {
+  margin-top: 9px;
+  padding-top: 7px;
+  border-top: 1px solid var(--rule);
+}
+
+.game-list-title {
+  margin: 0 0 5px;
+  color: var(--faint);
+  font: 400 9.5px/1.5 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.game-list-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: 400 10.5px/1.6 var(--mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.game-list-item:hover {
+  border-color: var(--rule);
+  background: var(--surface-2);
+}
+
+.game-list-item.on {
+  border-color: var(--ink);
+  background: var(--accent-tint);
+  color: var(--ink);
+}
+
+.game-list-item em {
+  font-style: normal;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
 .game-score {
   margin: 8px 0;
   font: 400 11px/1.5 var(--mono);

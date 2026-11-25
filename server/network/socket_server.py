@@ -95,6 +95,11 @@ class SocketServer:
         finally:
             self.services.users.logout(ctx.user_id, conn)
             self.services.users.detach(conn)
+            # 掉线/退出可能影响进行中的棋局：让对局层判负或取消
+            try:
+                self.services.chat.handle_disconnect(ctx.user_id)
+            except Exception as e:
+                log_line(f"[Game] 处理 {ctx.user_id} 断线时出错: {e}")
             try:
                 conn.close()
             except OSError:

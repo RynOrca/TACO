@@ -60,6 +60,16 @@ export interface ServerMsg {
   over?: boolean;
   result?: string;
   score?: { win: number; lose: number; draw: number };
+  /** game 消息：对局 id（字符串，和消息的 id 不是一回事）、玩家、观战数、双方战绩 */
+  game_id?: string;
+  players?: { X: string; O: string };
+  vs_agent?: boolean;
+  winner?: 'X' | 'O' | null;
+  legal?: number[];
+  spectators?: number;
+  scores?: Record<string, { win: number; lose: number; draw: number }>;
+  from?: string;
+  ttl?: number;
 }
 
 export interface HistoryItem {
@@ -80,11 +90,25 @@ export interface TodoItem {
 
 /** 井字棋面板状态（只发给下棋的本人） */
 export interface GameState {
+  /** 对局 id：一人一局，观战靠它区分 */
+  id: string;
+  players: { X: string; O: string };
+  /** 对手是不是 Agent（决定了提示文案和是否需要等模型） */
+  vs_agent: boolean;
   board: string[];               // 9 格：" " / "X" / "O"
   turn: 'X' | 'O';
   over: boolean;
   result: '' | 'win' | 'lose' | 'draw';
-  score: { win: number; lose: number; draw: number };
+  winner: 'X' | 'O' | null;
+  legal: number[];
+  spectators: number;
+  scores: Record<string, { win: number; lose: number; draw: number }>;
+}
+
+export interface GameInvite {
+  from: string;
+  at: number;
+  ttl: number;
 }
 
 export type SendMsg =

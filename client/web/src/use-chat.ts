@@ -19,6 +19,10 @@ export interface Chat {
   gameMove: (cell: number) => void;
   gameStart: () => void;
   gameQuit: () => void;
+  gameInvite: (target: string) => void;
+  gameAccept: () => void;
+  gameDecline: () => void;
+  gameFocus: (id: string) => void;
   setIncludePrivate: (value: boolean) => void;
   setHelp: (open: boolean) => void;
   recall: (id: number) => void;
@@ -302,6 +306,30 @@ export function useChat(): Chat {
     send({ type: 'game', text: 'quit' });
   }, [send]);
 
+  const gameInvite = useCallback(
+    (target: string) => {
+      if (!send({ type: 'game', text: `invite ${target}` })) {
+        dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，邀请没有发出去' });
+      }
+    },
+    [send],
+  );
+
+  const gameAccept = useCallback(() => {
+    dispatch({ type: 'game-invite-clear' });
+    send({ type: 'game', text: 'accept' });
+  }, [send]);
+
+  const gameDecline = useCallback(() => {
+    dispatch({ type: 'game-invite-clear' });
+    send({ type: 'game', text: 'decline' });
+  }, [send]);
+
+  const gameFocus = useCallback(
+    (id: string) => dispatch({ type: 'game-focus', id }),
+    [],
+  );
+
   const setIncludePrivate = useCallback(
     (value: boolean) => dispatch({ type: 'include-private', value }),
     [],
@@ -395,6 +423,10 @@ export function useChat(): Chat {
     gameMove,
     gameStart,
     gameQuit,
+    gameInvite,
+    gameAccept,
+    gameDecline,
+    gameFocus,
     setIncludePrivate,
     setHelp,
     recall,
