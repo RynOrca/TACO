@@ -8,8 +8,11 @@ const COMMANDS: { key: string; desc: string }[] = [
   { key: '/auto now', desc: '立刻总结一次（不受"新消息条数"门槛限制）' },
   { key: '/auto off', desc: '关闭定时总结；只发 /auto 可以查当前状态' },
   { key: '/game start', desc: '和 Agent 下一局井字棋，你执 X 先手；每走一步 Agent 都会用工具落子' },
-  { key: '/game move 5', desc: '把棋子下在第 5 格（1-9 从左到右、从上到下），非法格子会被服务端拒绝' },
-  { key: '/game board / status / quit', desc: '看棋盘 / 看战绩 / 退出当前对局' },
+  { key: '/game invite 用户名', desc: '邀请另一位成员对弈，对方接受即开局；其他人右栏可以直接观战' },
+  { key: '/game accept / decline', desc: '接受或拒绝邀请（120 秒内有效）' },
+  { key: '/game move 5', desc: '把棋子下在第 5 格（1-9 从左到右、从上到下），非法格子、抢跑都会被服务端拒绝' },
+  { key: '/game watch', desc: '列出所有进行中的对局，点右栏棋盘观战（观战不能落子）' },
+  { key: '/game board / status / quit', desc: '看棋盘 / 看战绩 / 退出对局（人对人时等于认输）' },
   { key: '/task list', desc: '查看全部定时任务（编号、类型、周期、下次时间、状态）' },
   { key: '/task add summary every:10', desc: '每 10 分钟让 Agent 总结一次群聊' },
   { key: '/task add reminder in:5 开会', desc: '5 分钟后广播一句提醒；把 in:5 换成 every:30 就是每 30 分钟提醒一次' },
@@ -48,7 +51,7 @@ const FEATURES: { key: string; desc: string }[] = [
   { key: '离线未读', desc: '别人在你离线时发的消息，登录后侧栏显示未读数，历史里用一条虚线标出"离线期间 N 条新消息"' },
   { key: '延迟监测', desc: '右栏「会话」里的 rtt 是每 5 秒一次 ping 的往返时间，>200ms 标黄、超时标红' },
   { key: '定时总结', desc: '到点自动总结群聊并广播；有新消息才会总结' },
-  { key: '井字棋', desc: '服务端持有棋盘，Agent 只能通过 game_move 工具落子；模型不可用时用本地策略代打，棋局不会卡住' },
+  { key: '井字棋', desc: '服务端持有棋盘，Agent 只能通过 game_move 工具落子；支持成员之间对弈与多人观战，一方掉线自动判负；模型不可用时用本地策略代打' },
   { key: '定时任务', desc: '定时总结 / 定时提醒统一调度，任务存 SQLite，重启不丢；到点自动广播' },
 ];
 

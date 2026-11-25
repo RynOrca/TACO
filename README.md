@@ -37,7 +37,8 @@
 | Agent | 提问 / 总结 | 群里 `@Agent 问题` 公开回答，`/agent 问题` 只回自己，`/agent@group` 指定公开；提问本身也会落库并显示 |
 | Agent | 真实工具调用 | 读历史、检索、存总结/待办、读服务器时间、联网搜索；每次调用的名字/参数/耗时/结果预览随回复回传，界面按「真实工具调用 N 次」展开 |
 | Agent | 定时任务 | `summary`（定时总结）/ `reminder`（定时提醒），任务落 SQLite、可增删启停、重启恢复；`/auto` 保留兼容 |
-| Agent | 井字棋 | 服务端棋盘 + 侧栏可点击棋盘；Agent 通过 `game_move` 工具落子，非法着法被拒绝；模型不可用时本地 minimax 代打 |
+| Agent | 井字棋（人对 Agent） | 服务端棋盘 + 侧栏可点击棋盘；Agent 通过 `game_move` 工具落子，非法着法被拒绝；模型不可用时本地 minimax 代打 |
+| 扩展 | 井字棋（人对人 + 观战） | `/game invite 用户名` 邀请另一位成员，接受后双方按轮次落子；其他人在右栏直接观战（只读棋盘、显示 `A vs B · N 人观战`）；一方掉线或认输判负 |
 | 扩展 | 记录持久化与检索 | SQLite + 分页 + 关键词检索，Agent 的 `search_chat_history` 走同一套 DAO |
 | 扩展 | 表情与图片 | Unicode 表情（纯表情放大）；图片压到最大边 1280，走 HTTP 上传，消息里只传文件名，支持 Ctrl+V 粘贴截图 |
 | 扩展 | 工具调用记录 | `steps` 字段回传 name/args/ok/ms/preview，答辩可直接展开 |
@@ -227,7 +228,7 @@ python -m server.main
 | `todos` | C→S | — | `ChatService.handle_todos` |
 | `autosummary` | C→S | `action`(`status`/`on`/`off`/`now`), `minutes` | `ChatService.handle_auto_summary`（`/auto` 快捷方式，内部映射到 summary 任务） |
 | `task` | C→S | `text`（`list` / `add summary every:10` / `add reminder in:5 开会` / `del|on|off 编号`） | `ChatService.handle_task` |
-| `game` | C→S | `text`（`start` / `move 5` / `board` / `status` / `quit`） | `ChatService.handle_game` |
+| `game` | C→S | `text`（`start` / `invite 用户名` / `accept` / `decline` / `move 5` / `watch` / `board` / `status` / `quit`） | `ChatService.handle_game` |
 | `history` | C→S | 可选 `target`、`agent`、`limit`、`before_id` | `ChatService.handle_history`；客户端不能指定 room_id |
 | `ping` | C→S | `seq`, `ts`（桥/CLI）或 `t`（Web 前端） | 回 `pong`，原样带回 `seq` / `t` |
 | `read` | C→S | `id`（我看到的最后一条）, 可选 `target`/`agent` | `handle_read` 推进已读水位 |
@@ -241,7 +242,7 @@ python -m server.main
 | `unread` | S→C | `unread_items` | 登录时下发各会话离线未读数、其中多少条 @我、上次读到的 id |
 | `recall` | S→C | `id`, `sender`, `room_id` | 撤回通知，按房间类型广播/单播 |
 | `muted` | S→C | `mutes` | 当前禁言名单（`user_id`/`until_at`/`by_user`） |
-| `game` | S→C | `action`(`state`/`closed`), `board`(9 格), `turn`, `over`, `result`, `score` | 只发给下棋本人，用于渲染可点击棋盘 |
+| `game` | S→C | `action`(`state`/`invite`/`closed`), `game_id`, `players`{X,O}, `vs_agent`, `board`(9 格), `turn`, `over`, `result`, `winner`, `legal`, `spectators`, `scores` | `state` 广播给房间内所有人（参与者拿到可点击棋盘，其他人只读观战）；`invite` 只发给被邀请人；`closed` 表示这盘从"进行中"里摘掉 |
 | `userlist` | S→C | `users` | 在线用户列表 |
 | `todos` | S→C | `items` | 当前房间待办 |
 | `history` | S→C | `items`, `target`, `before_id`, `more` | 历史消息，按时间正序 |
@@ -752,7 +753,8 @@ python -m client.bridge
 - 禁言需要管理员权限，`ADMIN_USERS` 没配时 `/mute` 会提示 `FORBIDDEN`；判断只在这一层，没有更细的角色体系。
 - 已读水位按"看到最后一条消息的 id"推进，多端登录会互相覆盖（同一账号只保留一份水位）。
 - 被禁言的人还能下井字棋：`/game` 是独立 handler，禁言只拦群聊/私聊/问 Agent 三条通道。
-- 井字棋的棋盘会广播给全群（所有人都会看到别人在下棋），演示三人同时在线时会有刷屏感。
+- 井字棋：每人同时只有一盘"自己的棋"，观战不限盘数；棋局和战绩在内存里，服务端重启清空。
+- 井字棋的进度会广播给全群（每步一行、不打完整棋谱）；同时开多盘时群里能看到所有对局的进度。
 
 ## 还没做的
 
