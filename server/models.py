@@ -19,8 +19,10 @@ class Message:
     sender: str
     room_id: int
     content: str
-    msg_type: str     # group / private / agent / system
+    msg_type: str     # group / private / image / file / agent / system
     timestamp: datetime
+    # 附加信息（JSON）：文件消息存 {"name","size","mime"}
+    meta: Optional[dict] = None
 
 
 @dataclass

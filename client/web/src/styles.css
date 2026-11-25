@@ -1290,6 +1290,55 @@ textarea {
   filter: brightness(1.03);
 }
 
+/* 文件消息卡片 */
+.filecard {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 320px;
+  padding: 7px 10px;
+  border: 1px solid var(--ink);
+  background: var(--surface-2);
+  color: var(--ink);
+  text-decoration: none;
+  transition: background 0.12s ease;
+}
+
+.filecard:hover {
+  background: var(--accent-tint);
+}
+
+.filecard-ico {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  color: var(--ink);
+  font: 700 9px/1 var(--mono);
+  letter-spacing: 0.04em;
+}
+
+.filecard-main {
+  min-width: 0;
+  display: grid;
+}
+
+.filecard-name {
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 230px;
+}
+
+.filecard-meta {
+  color: var(--faint);
+  font: 400 9.5px/1.6 var(--mono);
+}
+
 /* 整条消息就是几个表情时放大 */
 .big-emoji {
   font-size: 28px;

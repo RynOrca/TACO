@@ -4,7 +4,7 @@ import { initialState, reducer } from './store';
 import type { State } from './store';
 import { AGENT, MAIN, PAGE_SIZE, threadUser } from './types';
 import type { SendMsg } from './types';
-import { uploadImage } from './upload';
+import { uploadAttachment } from './upload';
 
 export type ComposeMode = 'chat' | 'agent' | 'agent-group';
 
@@ -14,7 +14,7 @@ export interface Chat {
   loadOlder: () => void;
   sendText: (text: string, mode: ComposeMode) => void;
   askAgent: (question: string, scope: 'private' | 'group') => void;
-  sendImage: (file: File) => Promise<void>;
+  sendFile: (file: File) => Promise<void>;
   autoSummary: (action: 'status' | 'on' | 'off' | 'now', minutes?: number) => void;
   setIncludePrivate: (value: boolean) => void;
   setHelp: (open: boolean) => void;
@@ -222,7 +222,7 @@ export function useChat(): Chat {
     [askAgent, send],
   );
 
-  const sendImage = useCallback(
+  const sendFile = useCallback(
     async (file: File) => {
       const { me, active, imageBase } = latest.current;
       if (!me) {
@@ -230,16 +230,25 @@ export function useChat(): Chat {
         return;
       }
       try {
-        const uploaded = await uploadImage(file, imageBase);
+        const up = await uploadAttachment(file, imageBase);
+        const base = {
+          msg: up.kind === 'image' ? '[图片]' : `[文件 ${up.name}]`,
+          name: up.name,
+          size: up.bytes,
+          mime: up.mime,
+          ...(up.kind === 'image' ? { image: up.file } : { file: up.file }),
+        };
         const payload =
           active === MAIN
-            ? { type: 'group' as const, msg: '[图片]', image: uploaded.file }
-            : { type: 'private' as const, target: threadUser(active), msg: '[图片]', image: uploaded.file };
+            ? { type: 'group' as const, ...base }
+            : active === AGENT
+              ? { type: 'agent' as const, msg: base.msg, scope: 'private' as const }
+              : { type: 'private' as const, target: threadUser(active), ...base };
         if (!send(payload)) {
-          dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，图片没有发出去' });
+          dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，附件没有发出去' });
         }
       } catch (error) {
-        dispatch({ type: 'local', kind: 'error', text: `图片发送失败：${(error as Error).message}` });
+        dispatch({ type: 'local', kind: 'error', text: `发送失败：${(error as Error).message}` });
       }
     },
     [send],
@@ -351,7 +360,7 @@ export function useChat(): Chat {
     loadOlder,
     sendText,
     askAgent,
-    sendImage,
+    sendFile,
     autoSummary,
     setIncludePrivate,
     setHelp,

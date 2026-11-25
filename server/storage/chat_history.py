@@ -4,6 +4,7 @@
 
 # 不会，让ai写；内容教学放到docs/内
 
+import json
 import sqlite3
 from typing import List,Optional
 from server.storage.db import get_conn, transaction,now_iso,row_to_message
@@ -85,15 +86,16 @@ def ensure_room(name: str, room_type: str = "group", owner_id: Optional[str] = N
 
 
 def save_message(room_id: int, sender: str, content: str,
-                 msg_type: str = "group") -> int:
+                 msg_type: str = "group", meta: Optional[dict] = None) -> int:
     _require_room(room_id)
     if not content or not content.strip():
         raise ValueError("content 不能为空")
+    payload = json.dumps(meta, ensure_ascii=False) if meta else None
     with transaction() as tx:
         cur = tx.execute(
-            """INSERT INTO messages (room_id, sender, content, msg_type, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (int(room_id), sender, content.strip(), msg_type, now_iso()),
+            """INSERT INTO messages (room_id, sender, content, msg_type, meta, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (int(room_id), sender, content.strip(), msg_type, payload, now_iso()),
         )
         return cur.lastrowid
 
@@ -102,7 +104,7 @@ def get_recent_history(room_id: int, limit: int = 20) -> List[Message]:
     """最近 limit 条，按时间倒序返回（调用方可反转成正序）。"""
     limit = _clamp(limit)
     rows = get_conn().execute(
-        """SELECT id, room_id, sender, content, msg_type, created_at
+        """SELECT id, room_id, sender, content, msg_type, meta, created_at
            FROM messages WHERE room_id = ?
            ORDER BY created_at DESC, id DESC
            LIMIT ?""",
@@ -115,7 +117,7 @@ def get_history_before(room_id: int, before_id: int, limit: int = 20) -> List[Me
     """最近 limit 条中 id 小于 before_id 的部分，按时间倒序返回（用于向上翻页）。"""
     limit = _clamp(limit)
     rows = get_conn().execute(
-        """SELECT id, room_id, sender, content, msg_type, created_at
+        """SELECT id, room_id, sender, content, msg_type, meta, created_at
            FROM messages WHERE room_id = ? AND id < ?
            ORDER BY created_at DESC, id DESC
            LIMIT ?""",
@@ -138,7 +140,7 @@ def search_history(room_id: int, keywords: List[str], limit: int = 20) -> List[M
     rank = " + ".join(["CASE WHEN content LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END"] * len(kws))
 
     rows = get_conn().execute(
-        f"""SELECT id, room_id, sender, content, msg_type, created_at
+        f"""SELECT id, room_id, sender, content, msg_type, meta, created_at
             FROM messages
             WHERE room_id = ? AND msg_type <> 'recalled' AND ({where})
             ORDER BY ({rank}) DESC, created_at DESC
@@ -190,7 +192,7 @@ def active_mute(user_id: str) -> Optional[dict]:
 
 def get_message(msg_id: int) -> Optional[dict]:
     row = get_conn().execute(
-        """SELECT id, room_id, sender, content, msg_type, created_at
+        """SELECT id, room_id, sender, content, msg_type, meta, created_at
            FROM messages WHERE id = ?""",
         (int(msg_id),),
     ).fetchone()

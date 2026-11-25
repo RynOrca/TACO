@@ -62,7 +62,7 @@ export default function App() {
           members={[...state.online.filter((u) => u !== state.me), 'Agent']}
           disabled={!state.me || state.link !== 'open'}
           onSend={chat.sendText}
-          onImage={chat.sendImage}
+          onImage={chat.sendFile}
         />
       </main>
 

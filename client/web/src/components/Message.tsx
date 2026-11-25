@@ -69,6 +69,56 @@ function AgentCard({ event, me }: { event: ChatEvent; me: string | null }) {
   );
 }
 
+const KIB = 1024;
+
+function humanSize(bytes: number): string {
+  if (!bytes) return '';
+  if (bytes < KIB) return `${bytes} B`;
+  if (bytes < KIB * KIB) return `${(bytes / KIB).toFixed(0)} KB`;
+  return `${(bytes / KIB / KIB).toFixed(1)} MB`;
+}
+
+const EXT_ICON: Record<string, string> = {
+  '.pdf': 'PDF',
+  '.zip': 'ZIP',
+  '.doc': 'DOC',
+  '.docx': 'DOC',
+  '.xls': 'XLS',
+  '.xlsx': 'XLS',
+  '.ppt': 'PPT',
+  '.pptx': 'PPT',
+  '.mp3': 'AUD',
+  '.wav': 'AUD',
+  '.mp4': 'VID',
+};
+
+function fileBadge(name: string): string {
+  const dot = name.lastIndexOf('.');
+  const ext = dot >= 0 ? name.slice(dot).toLowerCase() : '';
+  return EXT_ICON[ext] ?? (ext ? ext.slice(1, 4).toUpperCase() : 'FILE');
+}
+
+function FileCard({
+  attachment,
+  imageBase,
+}: {
+  attachment: NonNullable<ChatEvent['attachment']>;
+  imageBase: string;
+}) {
+  const href = `${imageBase}/file/${attachment.ref}`;
+  return (
+    <a className="filecard" href={href} target="_blank" rel="noreferrer" download={attachment.name}>
+      <span className="filecard-ico">{fileBadge(attachment.name)}</span>
+      <span className="filecard-main">
+        <span className="filecard-name">{attachment.name}</span>
+        <span className="filecard-meta">
+          {humanSize(attachment.size) || '点击下载'}
+        </span>
+      </span>
+    </a>
+  );
+}
+
 function Body({
   event,
   imageBase,
@@ -89,6 +139,9 @@ function Body({
         />
       </figure>
     );
+  }
+  if (event.attachment) {
+    return <FileCard attachment={event.attachment} imageBase={imageBase} />;
   }
   if (isEmojiOnly(event.text)) {
     return <div className="body big-emoji">{event.text.trim()}</div>;

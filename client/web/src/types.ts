@@ -49,9 +49,14 @@ export interface ServerMsg {
   mentions?: string[];
   /** muted 回执：当前被禁言的人和到期时间（与 userlist 的 users 共用字段，类型按 type 区分） */
   mutes?: MuteInfo[];
+  /** 附件消息：文件名（附件服务上的存储名） */
+  file?: string;
+  /** 附件附加信息 */
+  meta?: AttachmentMeta | null;
 }
 
 export interface HistoryItem {
+  meta?: AttachmentMeta | null;
   id: number;
   sender: string;
   content: string;
@@ -68,8 +73,25 @@ export interface TodoItem {
 
 export type SendMsg =
   | { type: 'login' | 'register'; user_id: string; password: string }
-  | { type: 'group'; msg: string; image?: string }
-  | { type: 'private'; target: string; msg: string; image?: string }
+  | {
+      type: 'group';
+      msg: string;
+      image?: string;
+      file?: string;
+      name?: string;
+      size?: number;
+      mime?: string;
+    }
+  | {
+      type: 'private';
+      target: string;
+      msg: string;
+      image?: string;
+      file?: string;
+      name?: string;
+      size?: number;
+      mime?: string;
+    }
   | { type: 'agent'; msg: string; scope: 'private' | 'group'; include_private?: boolean }
   | { type: 'history'; limit?: number; before_id?: number; target?: string; agent?: boolean }
   | { type: 'todos' }
@@ -104,6 +126,14 @@ export interface ChatEvent {
   agentScope?: 'private' | 'group';
   /** 这条消息 @了谁 */
   mentions?: string[];
+  /** 附件（图片或文件）的存储名 + 原名/大小 */
+  attachment?: { ref: string; kind: 'image' | 'file'; name: string; size: number; mime?: string };
+}
+
+export interface AttachmentMeta {
+  name?: string;
+  size?: number;
+  mime?: string;
 }
 
 export interface MuteInfo {

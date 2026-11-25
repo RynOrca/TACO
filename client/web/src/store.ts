@@ -119,10 +119,18 @@ function appendEvent(state: State, key: string, event: ChatEvent, active: boolea
 
 /** 客户端渲染用的时间戳来自收到的时刻；历史消息用 created_at */
 function eventFromHistory(item: HistoryItem): ChatEvent {
+  // image / file 是"消息的载体"，会话归属还是 group / private
   const kind: EventKind =
-    item.msg_type === 'group' || item.msg_type === 'private' || item.msg_type === 'agent'
-      ? item.msg_type
+    item.msg_type === 'group' ||
+    item.msg_type === 'private' ||
+    item.msg_type === 'agent' ||
+    item.msg_type === 'image' ||
+    item.msg_type === 'file'
+      ? item.msg_type === 'image' || item.msg_type === 'file'
+        ? 'group'
+        : item.msg_type
       : 'system';
+  const inPM = Boolean(item.msg_type === 'private');
   const stamp = parseStamp(item.created_at);
   const date = new Date(stamp);
   const event: ChatEvent = {
@@ -135,10 +143,20 @@ function eventFromHistory(item: HistoryItem): ChatEvent {
     stamp,
     id: item.id,
   };
+  if (inPM) event.kind = 'private';
   if (kind === 'agent') event.status = 'done';
   if (item.msg_type === 'image') {
     event.image = item.content;
     event.text = '[图片]';
+  } else if (item.msg_type === 'file') {
+    event.attachment = {
+      ref: item.content,
+      kind: 'file',
+      name: showName(item.content, item.meta?.name),
+      size: item.meta?.size ?? 0,
+      mime: item.meta?.mime,
+    };
+    event.text = `[文件 ${event.attachment.name}]`;
   }
   if (item.msg_type === 'agent_ask_group' || item.msg_type === 'agent_ask_private') {
     event.kind = 'ask';
@@ -199,10 +217,25 @@ function markRecalled(state: State, id: number | undefined): State {
   return changed ? { ...state, threads } : state;
 }
 
+/** 存储名是 <32位随机>.<后缀>，给人看的是 meta.name，没有就退回存储名 */
+function showName(ref: string, name?: string): string {
+  return name || ref;
+}
+
 function applyExtras(event: ChatEvent, msg: ServerMsg): void {
   if (msg.msg_type === 'image' && msg.image) {
     event.image = msg.image;
     event.text = '[图片]';
+  }
+  if (msg.msg_type === 'file' && msg.file) {
+    event.attachment = {
+      ref: msg.file,
+      kind: 'file',
+      name: showName(msg.file, msg.meta?.name),
+      size: msg.meta?.size ?? 0,
+      mime: msg.meta?.mime,
+    };
+    event.text = `[文件 ${event.attachment.name}]`;
   }
   // 服务端每轮都会带 steps；历史消息没有这个字段，界面要能区分"没调工具"和"不知道调没调"
   if (msg.steps) event.steps = msg.steps as ToolStep[];

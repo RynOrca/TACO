@@ -204,14 +204,14 @@ export function Composer({
             className="chip"
             disabled={disabled || uploading}
             onClick={() => fileInput.current?.click()}
-            title="发送图片（也可以直接 Ctrl+V 粘贴截图）"
+            title="发送图片或文件（也可以直接 Ctrl+V 粘贴截图）"
           >
-            {uploading ? '上传中…' : '图片'}
+            {uploading ? '上传中…' : '附件'}
           </button>
           <input
             ref={fileInput}
             type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp"
+            accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.zip,.txt,.md,.csv,.log,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.py,.js,.ts,.java,.c,.cpp,.h,.sql,.patch,.mp3,.mp4,.wav"
             hidden
             onChange={(e) => {
               void pickImage(e.target.files?.[0]);

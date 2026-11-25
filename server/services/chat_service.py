@@ -3,15 +3,15 @@
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import List, Optional, Tuple
-
-from datetime import timedelta
 
 from server import config
 from server.agent import agent_core
 from server.console import log_chat, log_line
 from server.models import Message
+from server.network.image_server import EXT_BY_MIME
 from server.services.context import RequestContext, err
 from server.storage import chat_history
 from server.storage.db import parse_ts
@@ -21,8 +21,8 @@ MAX_MSG_LEN = 2000
 RECALL_WINDOW_SECONDS = 120
 # 用户名允许的字符，@提及从这里切
 MENTION_RE = re.compile(r"@([\w一-龥-]{1,32})")
-# 图片文件名由图片服务生成：32 位十六进制 + 白名单后缀，客户端改不了路径
-IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{32}\.(?:jpg|jpeg|png|gif|webp)$")
+# 附件落盘名由服务端生成：32 位随机前缀 + 白名单后缀，客户端改不了路径
+STORED_NAME_RE = re.compile(r"^[0-9a-f]{32}\.[a-z0-9]{1,8}$")
 
 SUMMARY_PROMPT = (
     "请总结本群最近的讨论，面向群里所有人："
@@ -31,11 +31,22 @@ SUMMARY_PROMPT = (
 )
 
 
-def validate_image(value) -> Optional[str]:
-    """客户端带上来的图片引用必须是图片服务真实存在的那张，否则不认。"""
-    if not isinstance(value, str) or not IMAGE_NAME_RE.match(value):
+def validate_attachment(value) -> Optional[str]:
+    """客户端带上来的附件引用必须是附件服务真实存在的那一份，否则不认。"""
+    if not isinstance(value, str):
+        return None
+    if not STORED_NAME_RE.match(value):
+        return None
+    suf = Path(value).suffix.lower()
+    allowed = tuple(EXT_BY_MIME.values()) + config.FILE_EXT_ALLOWED
+    if suf not in allowed:
         return None
     return value if (config.IMAGE_DIR / value).is_file() else None
+
+
+def attachment_kind(value: str) -> str:
+    """"image" 还是 "file"：按后缀判断，客户端说了不算。"""
+    return "image" if Path(value).suffix.lower() in EXT_BY_MIME.values() else "file"
 
 
 class ChatService:
@@ -121,12 +132,16 @@ class ChatService:
     # ---------------------------------------------------------------- 群聊/私聊
     @staticmethod
     def _extract_body(msg: dict) -> Tuple[Optional[str], Optional[str], Optional[dict]]:
-        """返回（入库内容, 图片引用或 None, 错误回复）。"""
-        image = msg.get("image")
-        if image is not None:
-            ref = validate_image(image)
+        """返回（入库内容, 附件引用或 None, 错误回复）。
+
+        正文消息：content 就是用户打的字。
+        附件消息：content 存附件服务上的文件名，display 由 meta 补上原名/大小。
+        """
+        attachment = msg.get("file") if msg.get("file") is not None else msg.get("image")
+        if attachment is not None:
+            ref = validate_attachment(attachment)
             if ref is None:
-                return None, None, err("BAD_IMAGE", "图片引用无效或文件已丢失，请重新上传")
+                return None, None, err("BAD_ATTACHMENT", "附件引用无效或文件已丢失，请重新上传")
             return ref, ref, None
 
         content = (msg.get("msg") or "").strip()
@@ -144,17 +159,19 @@ class ChatService:
         if muted:
             return muted
 
-        content, image, bad = self._extract_body(msg)
+        content, attachment, bad = self._extract_body(msg)
         if bad:
             return bad
 
+        meta = self._attachment_meta(attachment, msg)
+        msg_type = attachment_kind(attachment) if attachment else "group"
         try:
             mid = chat_history.save_message(
-                ctx.room_id, ctx.user_id, content, "image" if image else "group")
+                ctx.room_id, ctx.user_id, content, msg_type, meta)
         except Exception as e:
             return err("SAVE_FAILED", f"消息保存失败：{e}")
 
-        log_chat("群聊", ctx.user_id, f"[图片 {image}]" if image else content,
+        log_chat("群聊", ctx.user_id, self._log_text(attachment, content, meta),
                  ctx.room_id, "main", ctx.addr)
 
         # @提及：只认真实存在的用户名，前端据此高亮/提醒被提到的人
@@ -163,13 +180,15 @@ class ChatService:
 
         payload = {
             "type": "group", "sender": ctx.user_id, "id": mid,
-            "msg": "[图片]" if image else content,
+            "msg": self._msg_text(attachment, content, meta),
         }
         if mentions:
             payload["mentions"] = mentions
-        if image:
-            payload["msg_type"] = "image"
-            payload["image"] = image
+        if attachment:
+            payload["msg_type"] = msg_type
+            payload["image" if msg_type == "image" else "file"] = attachment
+            if meta:
+                payload["meta"] = meta
         # sender 由服务端填充！！！！
         self.users.broadcast(payload)
         return None
@@ -188,35 +207,66 @@ class ChatService:
         if target == ctx.user_id:
             return err("SELF_PM", "不能给自己发私聊")
 
-        content, image, bad = self._extract_body(msg)
+        content, attachment, bad = self._extract_body(msg)
         if bad:
             return bad
 
+        meta = self._attachment_meta(attachment, msg)
+        msg_type = attachment_kind(attachment) if attachment else "private"
         try:
             room_name = self._pm_name(ctx.user_id, target)
             room_id = self._pm_room(ctx.user_id, target)
             mid = chat_history.save_message(
-                room_id, ctx.user_id, content, "image" if image else "private")
+                room_id, ctx.user_id, content, msg_type, meta)
         except Exception as e:
             return err("SAVE_FAILED", f"消息保存失败：{e}")
 
-        log_chat("私聊", ctx.user_id, f"[图片 {image}]" if image else content,
+        log_chat("私聊", ctx.user_id, self._log_text(attachment, content, meta),
                  room_id, room_name, ctx.addr, target=target)
 
         # target 一并回传：发送方要据此决定这条私聊落在哪个会话里
         payload = {
             "type": "private", "sender": ctx.user_id, "target": target,
-            "msg": "[图片]" if image else content, "id": mid,
+            "msg": self._msg_text(attachment, content, meta), "id": mid,
         }
-        if image:
-            payload["msg_type"] = "image"
-            payload["image"] = image
+        if attachment:
+            payload["msg_type"] = msg_type
+            payload["image" if msg_type == "image" else "file"] = attachment
+            if meta:
+                payload["meta"] = meta
         delivered = self.users.send_to(target, payload)
         # 回显给自己，否则发送方本地的私聊会话里看不到自己刚发的那条
         ctx.send(payload)
         if not delivered:
             return err("USER_OFFLINE", f"用户 {target} 不在线，消息已存入历史")
         return None
+
+    @staticmethod
+    def _attachment_meta(attachment: Optional[str], msg: dict) -> Optional[dict]:
+        """附件消息的附加信息（原名、大小、类型），存进 messages.meta 供历史和界面使用。"""
+        if not attachment:
+            return None
+        meta = {
+            "name": (msg.get("name") or "").strip()[:160] or attachment,
+            "size": int(msg.get("size") or 0),
+            "mime": (msg.get("mime") or "").strip()[:80],
+        }
+        return meta
+
+    @staticmethod
+    def _msg_text(attachment: Optional[str], content: str, meta: Optional[dict]) -> str:
+        if not attachment:
+            return content
+        if attachment_kind(attachment) == "image":
+            return "[图片]"
+        return f"[文件 {(meta or {}).get('name') or attachment}]"
+
+    @classmethod
+    def _log_text(cls, attachment: Optional[str], content: str, meta: Optional[dict]) -> str:
+        if not attachment:
+            return content
+        kind = "图片" if attachment_kind(attachment) == "image" else "文件"
+        return f"[{kind} {(meta or {}).get('name') or attachment}]"
 
     @staticmethod
     def _pm_name(a: str, b: str) -> str:
@@ -468,6 +518,7 @@ class ChatService:
                 "sender": m.sender,
                 "content": m.content,
                 "msg_type": m.msg_type,
+                "meta": m.meta,
                 "created_at": m.timestamp.isoformat() if m.timestamp else None,
             }
             for m in reversed(rows)
