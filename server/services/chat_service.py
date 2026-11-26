@@ -732,9 +732,10 @@ class ChatService:
             if not game.over:
                 return err("BAD_STATE", "这一局还没结束")
             if game.vs_agent:
-                # 人和 Agent：不用等谁确认，直接开新局
+                # 人和 Agent：不用等谁确认，直接按同一棋种开新局
+                kind = getattr(game, "kind", "ttt")
                 self._close_game(game)
-                fresh = self.games.start_vs_agent(ctx.user_id, ctx.room_id)
+                fresh = self.games.start_vs_agent(ctx.user_id, ctx.room_id, kind)
                 self._push_game(fresh, note=f"{ctx.user_id} 又来一局（对手：Agent）")
                 return None
 
