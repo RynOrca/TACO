@@ -1,6 +1,5 @@
 import type { GameInvite, GameState } from '../types';
-import { GameStage, isPlayerOf, myTurnOf, statusText } from './GameBoard';
-import { RematchBar } from './RematchBar';
+import { involvesMe, isPlayerOf, statusText } from './GameBoard';
 
 interface Props {
   /** 自己参与的对局（没有就是 null） */
@@ -11,42 +10,42 @@ interface Props {
   ongoing: GameState[];
   invite: GameInvite | null;
   me: string | null;
-  onMove: (cell: number) => void;
-  onStart: () => void;
-  onQuit: () => void;
   onFocus: (id: string) => void;
   onAccept: () => void;
   onDecline: () => void;
-  onRematch: () => void;
+  /** 进入专注模式看棋盘 */
+  onEnter: (id: string) => void;
 }
+
+const KIND_NAME: Record<string, string> = {
+  ttt: '井字棋',
+  gomoku: '五子棋',
+  bj: '21 点',
+};
 
 function countsDown(invite: GameInvite): number {
   const left = invite.ttl * 1000 - (Date.now() - invite.at);
   return Math.max(0, Math.ceil(left / 1000));
 }
 
-/** 侧栏里的紧凑版：标题 + 小棋盘 + 邀请 + 进行中列表 */
+/** 侧栏里的"对局入口"：只放摘要和按钮，棋盘留给专注模式 */
 export function GamePanel({
   mine,
   focused,
   ongoing,
   invite,
   me,
-  onMove,
-  onStart,
-  onQuit,
   onFocus,
   onAccept,
   onDecline,
-  onRematch,
+  onEnter,
 }: Props) {
   const game = mine ?? focused;
-  const myTurn = game ? myTurnOf(game, me) : false;
 
   const inviteCard = invite && countsDown(invite) > 0 && (
     <div className="game-invite">
       <p>
-        <b>{invite.from}</b> 邀请你对弈（{countsDown(invite)}s）
+        <b>{invite.from}</b> 邀请你玩{KIND_NAME[invite.kind ?? 'ttt'] ?? '井字棋'}（{countsDown(invite)}s）
       </p>
       <div className="game-invite-btns">
         <button type="button" className="btn primary" onClick={onAccept}>
@@ -62,45 +61,40 @@ export function GamePanel({
   if (!game) {
     return (
       <section className="game">
-        <h2>井字棋</h2>
+        <h2>当前对局</h2>
         {inviteCard}
-        <p className="panel-empty">
-          和 Agent 下一局，或 <code>/game invite 用户名</code> 找人对弈。
-        </p>
-        <button type="button" className="btn primary" onClick={onStart}>
-          和 Agent 开局
-        </button>
+        <p className="panel-empty">还没有进行中的对局，在下面开一局或邀请别人。</p>
       </section>
     );
   }
 
+  const isPlayer = isPlayerOf(game, me);
+  const opponent = game.kind === 'bj'
+    ? `${game.bj?.seats.length ?? 1} 人同桌 · 庄家 Agent`
+    : `对手 ${game.players.O === 'Agent' ? 'Agent' : game.players.O}`;
+
   return (
     <section className="game">
       <h2>
-        <span className="game-title">
-          井字棋
-          <em>
-            {game.players.X} vs {game.players.O}
-            {game.spectators > 0 ? ` · ${game.spectators} 人观战` : ''}
-          </em>
-        </span>
+        当前对局
+        {!isPlayer && <span className="tag soft">(观战)</span>}
       </h2>
 
+      <div className={`game-card${game.over ? ' over' : ''}`}>
+        <div className="game-card-top">
+          <b>{KIND_NAME[game.kind] ?? '棋局'}</b>
+          <em>{opponent}</em>
+        </div>
+        <p className={`game-card-state${game.over ? ' done' : ''}`}>
+          {statusText(game, me)}
+          {!isPlayer && <span className="game-spectate">只读</span>}
+        </p>
+        <button type="button" className="btn primary game-card-enter" onClick={() => onEnter(game.id)}>
+          {game.over ? '查看结果' : '进入牌桌'}
+        </button>
+      </div>
+
       {inviteCard}
-
-      <p
-        className={`game-state${game.over ? ' done' : myTurn ? ' mine' : ' wait'}`}
-        title={isPlayerOf(game, me) ? '你是这盘的玩家' : '观战'}
-      >
-        {statusText(game, me)}
-        {!isPlayerOf(game, me) && <span className="game-spectate">只读</span>}
-      </p>
-
-      <GameStage game={game} me={me} onMove={onMove} />
-
-      {game.over && isPlayerOf(game, me) && (
-        <RematchBar game={game} me={me} onRematch={onRematch} onQuit={onQuit} />
-      )}
 
       {ongoing.length > 1 && (
         <div className="game-list">
@@ -113,13 +107,15 @@ export function GamePanel({
               onClick={() => onFocus(item.id)}
             >
               <span>
-                {item.players.X} vs {item.players.O}
+                {KIND_NAME[item.kind] ?? '棋局'} · {item.players.X} vs {item.players.O}
               </span>
               <em>{item.turn === 'X' ? item.players.X : item.players.O} 落子</em>
             </button>
           ))}
         </div>
       )}
+
+      {!involvesMe(game, me) && <p className="auto-hint">你正在观战，点「进入牌桌」看完整棋盘。</p>}
     </section>
   );
 }

@@ -114,14 +114,10 @@ export default function App() {
         refreshTodos={chat.refreshTodos}
         autoSummary={chat.autoSummary}
         setIncludePrivate={chat.setIncludePrivate}
-        onGameMove={chat.gameMove}
-        onGameStart={chat.gameStart}
-        onGameQuit={chat.gameQuit}
         onGameInvite={chat.gameInvite}
         onGameAccept={chat.gameAccept}
         onGameDecline={chat.gameDecline}
         onGameFocus={chat.gameFocus}
-        onGameRematch={chat.gameRematch}
         onEnterArena={() => chat.setLayout('game')}
         onStartKind={chat.gameStartKind}
       />

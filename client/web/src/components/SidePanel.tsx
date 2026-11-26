@@ -25,14 +25,10 @@ interface Props {
   refreshTodos: () => void;
   autoSummary: (action: 'status' | 'on' | 'off' | 'now', minutes?: number) => void;
   setIncludePrivate: (value: boolean) => void;
-  onGameMove: (cell: number) => void;
-  onGameStart: () => void;
-  onGameQuit: () => void;
   onGameInvite: (target: string) => void;
   onGameAccept: () => void;
   onGameDecline: () => void;
   onGameFocus: (id: string) => void;
-  onGameRematch: () => void;
   onEnterArena: () => void;
   onStartKind: (kind: 'ttt' | 'gomoku' | 'bj') => void;
 }
@@ -43,14 +39,10 @@ export function SidePanel({
   refreshTodos,
   autoSummary,
   setIncludePrivate,
-  onGameMove,
-  onGameStart,
-  onGameQuit,
   onGameInvite,
   onGameAccept,
   onGameDecline,
   onGameFocus,
-  onGameRematch,
   onEnterArena,
   onStartKind,
 }: Props) {
@@ -218,19 +210,14 @@ export function SidePanel({
                 ongoing={ongoingGames}
                 invite={state.gameInvite}
                 me={state.me}
-                onMove={onGameMove}
-                onStart={onGameStart}
-                onQuit={onGameQuit}
                 onFocus={onGameFocus}
                 onAccept={onGameAccept}
                 onDecline={onGameDecline}
-                onRematch={onGameRematch}
+                onEnter={(id) => {
+                  onGameFocus(id);
+                  onEnterArena();
+                }}
               />
-            )}
-            {(mineGame || focusedGame) && state.layout === 'chat' && (
-              <button type="button" className="btn primary enter-arena" onClick={onEnterArena}>
-                进入牌桌
-              </button>
             )}
             <section>
               <h2>和 Agent 开局</h2>
