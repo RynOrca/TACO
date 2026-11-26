@@ -148,6 +148,7 @@ def run_detailed(
     agent_room_id: Optional[int] = None,
     extra_tools: Optional[Tuple[List[dict], Dict[str, Callable]]] = None,
     fast: bool = False,
+    deadline: Optional[float] = None,
 ) -> Tuple[str, List[dict]]:
     """跑一轮 Agent，返回（最终回复, 工具调用记录）。工具记录用于界面展示「真实调用」。
 
@@ -184,6 +185,10 @@ def run_detailed(
 
     steps: List[dict] = []
     for step in range(max_steps):
+        # 总超时到点就收手：宁可带着已有结果回复，也别让人一直等
+        if deadline is not None and time.monotonic() > deadline:
+            print(f"[Agent] 达到总超时（{step} 步后），返回已有结果")
+            return "[已超时] 这轮思考超过设定时长，先把已经拿到的结果发给你。", steps
         started = time.perf_counter()
         try:
             resp = _chat_create(messages, spec, FAST_TIMEOUT if fast else 30, fast)

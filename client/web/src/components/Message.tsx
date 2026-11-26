@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { RichText } from '../rich';
 import { fullStamp } from '../time';
 import type { ChatEvent, ToolStep } from '../types';
@@ -32,8 +33,18 @@ function AgentCard({ event, me }: { event: ChatEvent; me: string | null }) {
   const pending = event.status === 'pending';
   const steps = event.steps ?? [];
   const known = event.steps !== undefined;
+  // 等待时长：超过 45 秒就提示可能超时，别让人对着「正在思考」发呆
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!pending) return;
+    const timer = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [pending]);
+  const waited = pending ? Math.max(0, Math.round((Date.now() - event.stamp) / 1000)) : 0;
   const title = pending
-    ? event.text
+    ? waited >= 45
+      ? `${event.text} · 已等 ${waited}s，可能超时了，可以再问一次`
+      : `${event.text} · ${waited}s`
     : event.scheduled
       ? '定时自动总结 · 服务端调度'
       : !known

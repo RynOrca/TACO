@@ -2,6 +2,7 @@
 
 import re
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -79,6 +80,8 @@ class ChatService:
         self.users = users
         # Agent 调用是阻塞的，放独立线程池，不占住连接线程
         self._agent_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="agent")
+        # 棋类/牌类的模型调用单独一个池：一次慢调用不该把“问 Agent”堵死
+        self._game_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="game")
         # 定时总结调度器，由 main.py 注入（服务层不自己起线程）
         self.scheduler = None
         # 井字棋：每个用户一盘，状态只在服务端
@@ -374,14 +377,21 @@ class ChatService:
     def _agent_task(self, user_id: str, conn, group_room: int,
                     agent_room: Optional[int], text: str, scope: str,
                     thread: str, answer_room: int):
+        # 总超时：多步 ReAct 可能一次次累积，这里给整轮一个上限，
+        # 到点就带着已有结果回一条，不能让人等半天什么都不显示
+        deadline = time.monotonic() + max(10, config.AGENT_TIMEOUT)
         try:
             reply, steps = agent_core.run_detailed(
                 text, max_steps=config.AGENT_MAX_STEPS, room_id=group_room,
                 user_id=user_id, agent_room_id=agent_room,
+                deadline=deadline,
             )
         except Exception as e:
             print(f"[Agent] 调用异常: {e}")
             reply, steps = f"Agent 调用失败：{e}", []
+
+        if not (reply or "").strip():
+            reply = "Agent 没有返回内容，可以再问一次或换个说法。"
 
         reply = _clamp_reply(reply)
         payload = {
@@ -693,7 +703,7 @@ class ChatService:
             if game.over:
                 self._finish_game(game)
             elif getattr(game, "kind", "ttt") != "bj" and game.vs_agent and game.turn == "O":
-                self._agent_pool.submit(self._game_agent_task, ctx.user_id, game)
+                self._game_pool.submit(self._game_agent_task, ctx.user_id, game)
             return None
 
         # ---------------- 观战 / 查询 ----------------
@@ -1071,3 +1081,4 @@ class ChatService:
 
     def shutdown(self):
         self._agent_pool.shutdown(wait=False)
+        self._game_pool.shutdown(wait=False)
