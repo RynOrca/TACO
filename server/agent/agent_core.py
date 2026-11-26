@@ -149,6 +149,7 @@ def run_detailed(
     extra_tools: Optional[Tuple[List[dict], Dict[str, Callable]]] = None,
     fast: bool = False,
     deadline: Optional[float] = None,
+    extra_context: str = "",
 ) -> Tuple[str, List[dict]]:
     """跑一轮 Agent，返回（最终回复, 工具调用记录）。工具记录用于界面展示「真实调用」。
 
@@ -177,6 +178,10 @@ def run_detailed(
          "别人的私聊仍然不可见。" if agent_room_id is not None
          else "可见范围：仅群聊消息；任何私聊消息对你不可见。"),
     ]
+    if extra_context:
+        # 当前对局是服务端实时状态，比聊天记录更权威
+        env.append("当前对局：")
+        env.append(extra_context)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT + "\n环境信息：\n" + "\n".join(env)},
         *(history or []),

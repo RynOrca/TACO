@@ -371,12 +371,13 @@ class ChatService:
             self._agent_task, ctx.user_id, ctx.conn, group_room,
             agent_room if include_private else None,
             prompt, scope, thread, answer_room,
+            self._game_context(ctx.user_id),
         )
         return None
 
     def _agent_task(self, user_id: str, conn, group_room: int,
                     agent_room: Optional[int], text: str, scope: str,
-                    thread: str, answer_room: int):
+                    thread: str, answer_room: int, game_context: str = ""):
         # 总超时：多步 ReAct 可能一次次累积，这里给整轮一个上限，
         # 到点就带着已有结果回一条，不能让人等半天什么都不显示
         deadline = time.monotonic() + max(10, config.AGENT_TIMEOUT)
@@ -384,7 +385,7 @@ class ChatService:
             reply, steps = agent_core.run_detailed(
                 text, max_steps=config.AGENT_MAX_STEPS, room_id=group_room,
                 user_id=user_id, agent_room_id=agent_room,
-                deadline=deadline,
+                deadline=deadline, extra_context=game_context,
             )
         except Exception as e:
             print(f"[Agent] 调用异常: {e}")
@@ -530,6 +531,64 @@ class ChatService:
         self.users.broadcast({"type": "autosummary", **self.scheduler.status()})
         return {"type": "system", "msg": f"{ctx.user_id} 开启了 Agent 定时总结：每 {minutes} 分钟一次"}
 
+    # ---------------------------------------------------------------- 对局上下文
+    def _game_context(self, user_id: str) -> str:
+        """把"当前对局"整理成一段给模型看的环境信息。
+
+        只放公开信息：棋类可以直接给棋盘；21 点只给庄家明牌和各座位张数，
+        绝不能把别人的（或自己的）暗牌写进提示词。
+        """
+        game = self.games.current(user_id)
+        if game is None:
+            finished = self.games.finished_for(user_id)
+            game = max(finished, key=lambda g: g.updated_at, default=None)
+        if game is None:
+            return ""
+
+        kind = getattr(game, "kind", "ttt")
+        label = game_service.game_name(kind)
+        state = "已结束" if game.over else "进行中"
+
+        if kind == "bj":
+            view = game.view_for(user_id)["bj"]
+            mine = next((s for s in view["seats"] if s["user"] == user_id), None)
+            seats = "、".join(
+                f"{s['user']}（{s['count']} 张，{s['status']}）" for s in view["seats"]
+            )
+            up = view["dealer"][0]
+            upcard = f"{up['rank']}{up['suit']}" if up else "未知"
+            lines = [
+                f"你在和用户玩 21 点（{state}）：你是 {user_id}" if mine else f"当前有一桌 21 点（{state}）",
+                f"庄家明牌：{upcard}（暗牌未揭示），庄家点数：{view['dealer_score']}",
+                f"座位：{seats}",
+                f"当前轮到：{view['current'] or '结算中'}；底注 {view['bet']} 枚；第 {view['round']} 局",
+            ]
+            if game.over:
+                lines.append(f"本局结果：{self._game_result_text(game)}")
+            lines.append("注意：你看不到任何人的具体牌面，只能看到张数与状态。")
+            return "\n".join(lines)
+
+        players = game.players()
+        my_mark = game.mark_of(user_id) or "观战"
+        lines = [
+            f"当前棋局：{label}（{state}），{players['X']} 执 X，{players['O']} 执 O，你是 {my_mark}",
+            f"手数：{sum(1 for c in game.board if c != ' ')}；轮到：{players[game.turn]}"
+            if not game.over else f"结果：{self._game_result_text(game)}",
+        ]
+        if getattr(game, "last_move", None) is not None and getattr(game, "size", 3) > 3:
+            row, col = divmod(game.last_move, game.size)
+            lines.append(f"最后一手：第 {row + 1} 行第 {col + 1} 列")
+        if getattr(game, "size", 3) <= 3:
+            lines.append("棋盘（数字是空位）：")
+            lines.append(game.render())
+        else:
+            stones = [
+                f"{'X' if c == 'X' else 'O'}@{i // game.size + 1},{i % game.size + 1}"
+                for i, c in enumerate(game.board) if c != " "
+            ]
+            lines.append("最近落子（行列）：" + "、".join(stones[-12:]))
+        return "\n".join(lines)
+
     # ---------------------------------------------------------------- 井字棋
     def _spectators(self, game) -> int:
         """观战人数 = 在线人数 - 这盘的两个玩家。"""
@@ -551,6 +610,11 @@ class ChatService:
 
     @staticmethod
     def _game_result_text(game) -> str:
+        if getattr(game, "kind", "ttt") == "bj":
+            # 21 点是按座位结算的，没有单一 winner
+            cn = {"win": "赢", "lose": "输", "draw": "平"}
+            parts = [f"{seat.user} {cn.get(seat.result, '-')}" for seat in game.seats]
+            return "、".join(parts) if parts else "本局结束"
         if game.result == "draw":
             return "平局"
         return f"{game.players()[game.winner]} 获胜"
