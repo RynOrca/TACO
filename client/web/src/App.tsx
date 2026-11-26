@@ -10,6 +10,7 @@ import { AuthGate } from './components/AuthGate';
 import { Prompt } from './components/Prompt';
 import { HelpDialog } from './components/HelpDialog';
 import { Arena } from './components/Arena';
+import { involvesMe } from './components/GameBoard';
 
 export default function App() {
   const chat = useChat();
@@ -22,8 +23,7 @@ export default function App() {
 
   const layout = state.layout;
   const allGames = Object.values(state.games);
-  const mineGame =
-    allGames.find((g) => state.me && (g.players.X === state.me || g.players.O === state.me)) ?? null;
+  const mineGame = allGames.find((g) => involvesMe(g, state.me)) ?? null;
   const focusedGame = state.gameFocus ? state.games[state.gameFocus] ?? null : null;
   const arenaGame = mineGame ?? focusedGame;
 

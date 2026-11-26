@@ -78,6 +78,23 @@ export function Arena({
         </div>
       </div>
 
+      {invite && !isPlayer && (
+        <div className="arena-invite">
+          <span>
+            <b>{invite.from}</b> 邀请你玩
+            {invite.kind === 'gomoku' ? '五子棋' : invite.kind === 'bj' ? '21 点' : '井字棋'}
+          </span>
+          <span className="game-invite-btns">
+            <button type="button" className="btn primary" onClick={onAccept}>
+              接受
+            </button>
+            <button type="button" className="btn" onClick={onDecline}>
+              拒绝
+            </button>
+          </span>
+        </div>
+      )}
+
       <div className="arena-stage">
         {game ? (
           <GameStage game={game} me={me} size="large" onMove={onMove} />
@@ -126,7 +143,7 @@ export function Arena({
           {game.over && isPlayer && (
             <RematchBar game={game} me={me} onRematch={onRematch} onQuit={onQuit} />
           )}
-          {game.kind === 'bj' && !game.over && isPlayer && (
+          {game.kind === 'bj' && !game.over && game.bj?.current === me && (
             <span className="bj-actions">
               <button type="button" className="btn primary" onClick={onHit}>
                 要牌

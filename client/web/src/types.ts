@@ -101,8 +101,25 @@ export interface BjCard {
   suit: string;
 }
 
+export interface BjSeat {
+  user: string;
+  /** 这个座位拿了几张牌（所有人都能看到张数） */
+  count: number;
+  status: 'playing' | 'stand' | 'bust';
+  result: '' | 'win' | 'lose' | 'draw';
+  /** 只有本座位的连接能拿到自己的牌面与点数 */
+  hand: BjCard[] | null;
+  score: number | null;
+  bet: number;
+}
+
 export interface BjView {
-  /** 自己的手牌；观战者/对手这里是空数组 */
+  seats: BjSeat[];
+  /** 我在哪一个座位（观战者是 null） */
+  me: string | null;
+  /** 轮到谁决策 */
+  current: string | null;
+  /** 旧的单人字段，保留兼容 */
   player: BjCard[];
   player_count: number;
   player_score: number | null;
@@ -146,6 +163,8 @@ export interface GameInvite {
   from: string;
   at: number;
   ttl: number;
+  /** ttt / gomoku / bj */
+  kind?: string;
 }
 
 export type SendMsg =

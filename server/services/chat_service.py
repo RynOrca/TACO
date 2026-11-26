@@ -554,7 +554,10 @@ class ChatService:
         if game.over:
             return f"{head} · 结果：{self._game_result_text(game)}"
         if getattr(game, "kind", "ttt") == "bj":
-            return f"{head} · 轮到你决策"
+            seats = getattr(game, "seats", [])
+            current = game.view_for(None)["bj"]["current"]
+            who = f"轮到 {current}" if current else "结算中"
+            return f"{head}（{len(seats)} 人同桌）· {who}"
         return f"{head} · 轮到 {players[game.turn]}"
 
     def _push_game(self, game, note: str = "", announce: bool = True) -> None:
@@ -621,7 +624,7 @@ class ChatService:
             if kind in ("gomoku", "五子棋"):
                 kind = "gomoku"
             elif kind in ("bj", "21", "21点"):
-                return err("BAD_PARAM", "21 点只能和 Agent 庄家对局，用 /game start bj")
+                kind = "bj"
             else:
                 kind = "ttt"
             if not target:
@@ -750,7 +753,18 @@ class ChatService:
             return None
 
         if action == "quit":
-            game = self.games.current(ctx.user_id)
+            current_game = self.games.current(ctx.user_id)
+            if current_game is not None and getattr(current_game, "kind", "") == "bj":
+                seats = [s for s in current_game.seats if s.user != ctx.user_id]
+                if seats:
+                    current_game.seats = seats
+                    current_game._normalise_turn()
+                    self._push_game(current_game, note=f"{ctx.user_id} 离开了牌桌", announce=True)
+                    self.games.drop(ctx.user_id)
+                    return {"type": "system", "msg": "你已离开牌桌"}
+                self._close_game(current_game)
+                return {"type": "system", "msg": "你已离开牌桌（这张桌没人了，已关闭）"}
+            game = current_game
             if game is None:
                 # 结束后玩家名额已释放：从"已结束但还留着"的棋局里找我那一盘
                 finished = [g for g in self.games.finished_for(ctx.user_id) if not g.vs_agent]
@@ -806,6 +820,15 @@ class ChatService:
         self.games.clear_invites(user_id)
         game = self.games.current(user_id)
         if game is None or game.over:
+            return
+        if getattr(game, "kind", "") == "bj":
+            # 21 点是一桌人：掉线只摘掉自己的座位，别把别人的牌局cancel掉
+            left = self.games.remove_player(game, user_id)
+            if not left:
+                self._close_game(game)
+                self.users.broadcast({"type": "system", "msg": "[21 点] 牌桌没人了，已关闭"})
+            else:
+                self._push_game(game, note=f"{user_id} 掉线离开", announce=True)
             return
         if game.vs_agent:
             self._close_game(game)

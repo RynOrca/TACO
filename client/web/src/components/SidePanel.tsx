@@ -3,6 +3,7 @@ import { threadOf } from '../store';
 import type { State } from '../store';
 import { MAIN } from '../types';
 import { GamePanel } from './GamePanel';
+import { involvesMe } from './GameBoard';
 
 const QUICK = [
   { label: '总结最近 30 条消息', question: '总结一下本群最近的讨论，并把待办事项列出来', scope: 'group' as const },
@@ -59,10 +60,7 @@ export function SidePanel({
   const members = [...state.online];
   const others = members.filter((u) => u !== state.me);
   const allGames = Object.values(state.games);
-  const mineGame =
-    allGames.find(
-      (g) => state.me && (g.players.X === state.me || g.players.O === state.me),
-    ) ?? null;
+  const mineGame = allGames.find((g) => involvesMe(g, state.me)) ?? null;
   const focusedGame = state.gameFocus ? state.games[state.gameFocus] ?? null : null;
   const ongoingGames = allGames.filter((g) => !g.over);
   const mainCount = threadOf(state, MAIN).events.filter((e) => e.kind === 'group').length;
@@ -213,21 +211,23 @@ export function SidePanel({
 
         {tab === 'game' && (
           <>
-            <GamePanel
-              mine={mineGame}
-              focused={focusedGame}
-              ongoing={ongoingGames}
-              invite={state.gameInvite}
-              me={state.me}
-              onMove={onGameMove}
-              onStart={onGameStart}
-              onQuit={onGameQuit}
-              onFocus={onGameFocus}
-              onAccept={onGameAccept}
-              onDecline={onGameDecline}
-              onRematch={onGameRematch}
-            />
-            {(mineGame || focusedGame) && (
+            {state.layout === 'chat' && (
+              <GamePanel
+                mine={mineGame}
+                focused={focusedGame}
+                ongoing={ongoingGames}
+                invite={state.gameInvite}
+                me={state.me}
+                onMove={onGameMove}
+                onStart={onGameStart}
+                onQuit={onGameQuit}
+                onFocus={onGameFocus}
+                onAccept={onGameAccept}
+                onDecline={onGameDecline}
+                onRematch={onGameRematch}
+              />
+            )}
+            {(mineGame || focusedGame) && state.layout === 'chat' && (
               <button type="button" className="btn primary enter-arena" onClick={onEnterArena}>
                 进入牌桌
               </button>

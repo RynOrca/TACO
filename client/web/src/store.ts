@@ -414,7 +414,12 @@ function onServer(state: State, msg: ServerMsg): State {
         if (!msg.from) return state;
         return {
           ...state,
-          gameInvite: { from: msg.from, at: Date.now(), ttl: msg.ttl ?? 120 },
+          gameInvite: {
+            from: msg.from,
+            at: Date.now(),
+            ttl: msg.ttl ?? 120,
+            kind: msg.kind ?? 'ttt',
+          },
         };
       }
       if (msg.action === 'closed') {
@@ -460,11 +465,15 @@ function onServer(state: State, msg: ServerMsg): State {
         : state.gameFocus && state.games[state.gameFocus]
           ? state.gameFocus
           : game.id;
+      // 只有"这盘确实有我在里面"才清掉邀请；旁观别人的牌桌不该把邀请吞掉
+      const mineNow = kind === 'bj'
+        ? Boolean(state.me && game.bj?.seats.some((x) => x.user === state.me))
+        : Boolean(state.me && (game.players.X === state.me || game.players.O === state.me));
       return {
         ...state,
         games: { ...state.games, [game.id]: game },
         gameFocus: focus,
-        gameInvite: null,
+        gameInvite: mineNow ? null : state.gameInvite,
       };
     }
 

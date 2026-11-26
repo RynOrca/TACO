@@ -12,13 +12,20 @@ export function resultText(game: GameState): string {
   return '本局结束';
 }
 
+/** 我是不是这桌的人：21 点看座位表，棋类看 X/O */
+export function involvesMe(game: GameState, me: string | null): boolean {
+  if (!me) return false;
+  if (game.kind === 'bj') return Boolean(game.bj?.seats.some((s) => s.user === me));
+  return game.players.X === me || game.players.O === me;
+}
+
 export function isPlayerOf(game: GameState, me: string | null): boolean {
-  return Boolean(me) && (game.players.X === me || game.players.O === me);
+  return involvesMe(game, me);
 }
 
 export function myTurnOf(game: GameState, me: string | null): boolean {
   if (!me || game.over) return false;
-  if (game.kind === 'bj') return game.players.X === me;      // 21 点：玩家决策，庄家按规则补牌
+  if (game.kind === 'bj') return game.bj?.current === me;   // 21 点：按座位轮转，庄家最后补牌
   const myMark = me === game.players.X ? 'X' : me === game.players.O ? 'O' : null;
   return Boolean(myMark) && game.turn === myMark;
 }
@@ -28,9 +35,14 @@ export function statusText(game: GameState, me: string | null): string {
   const myTurn = myTurnOf(game, me);
   if (game.kind === 'bj') {
     if (game.over) return resultText(game);
-    const score = game.bj?.player_score ?? 0;
-    if (!isPlayer) return '观战中 · 只能看到明牌';
-    return myTurn ? `轮到你决策（${score} 点）` : `等待庄家结算（${score} 点）`;
+    const seat = game.bj?.seats.find((s) => s.user === me);
+    if (!isPlayer) {
+      const current = game.bj?.current;
+      return current ? `观战中 · 轮到 ${current}` : '观战中';
+    }
+    return myTurn
+      ? `轮到你决策（${seat?.score ?? 0} 点）`
+      : `等待 ${game.bj?.current ?? '庄家'} 决策`;
   }
   if (game.over) return resultText(game);
   const myMark = me === game.players.X ? 'X' : me === game.players.O ? 'O' : null;

@@ -397,12 +397,18 @@ class GameService:
             return [g for g in self._games.values() if not g.over]
 
     # ---------------------------------------------------------------- 开局
+    @staticmethod
+    def _players_of(game) -> List[str]:
+        """一局涉及的所有真人（21 点是一桌人）。"""
+        if getattr(game, "kind", "ttt") == "bj":
+            return [s.user for s in getattr(game, "seats", [])]
+        return [p for p in (game.x_user, getattr(game, "o_user", None)) if p]
+
     def _register(self, game):
         with self._lock:
             self._games[game.id] = game
-            self._by_user[game.x_user] = game.id
-            if getattr(game, "o_user", None):
-                self._by_user[game.o_user] = game.id
+            for player in self._players_of(game):
+                self._by_user[player] = game.id
         return game
 
     def start_vs_agent(self, user_id: str, room_id=None, kind: str = "ttt"):
@@ -415,11 +421,24 @@ class GameService:
         if inviter == invitee:
             return False, "不能邀请自己"
         with self._lock:
-            if self._by_user.get(inviter):
-                return False, "你已经有进行中的对局了"
+            mine = self._games.get(self._by_user.get(inviter) or "")
+            if kind == "bj":
+                # 21 点：已经有牌桌就把人拉上桌，否则新开一张
+                if mine is not None and not mine.over and getattr(mine, "kind", "") == "bj":
+                    if len(getattr(mine, "seats", [])) >= 3:
+                        return False, "这张桌已经坐满了（最多 3 人）"
+                    table_id = mine.id
+                else:
+                    table_id = ""
+            else:
+                if mine is not None:
+                    return False, "你已经有进行中的对局了"
+                table_id = ""
             if self._by_user.get(invitee):
                 return False, f"{invitee} 正在对局中"
-            self._invites[invitee] = {"from": inviter, "ts": time.time(), "kind": kind}
+            self._invites[invitee] = {
+                "from": inviter, "ts": time.time(), "kind": kind, "table": table_id,
+            }
         return True, f"已邀请 {invitee} 玩{game_name(kind)}，等对方回复（{INVITE_TTL_SECONDS} 秒内有效）"
 
     def pending_invite(self, user_id: str) -> Optional[dict]:
@@ -447,11 +466,24 @@ class GameService:
             return False, "没有待接受的邀请（可能已过期）", None
         inviter = invite["from"]
         kind = invite.get("kind", "ttt")
+        if kind == "bj":
+            # 21 点：邀请人本来就在桌上，这里只检查被邀请人
+            from server.services.blackjack import BlackjackGame
+            if self._by_user.get(invitee):
+                return False, "你已经在别的对局里了", None
+            table = self.get(invite.get("table") or "")
+            if table is not None and not table.over and getattr(table, "kind", "") == "bj":
+                ok, detail = table.add_player(invitee)
+                if not ok:
+                    return False, detail, None
+                with self._lock:
+                    self._by_user[invitee] = table.id
+                return True, detail, table
+            game = BlackjackGame(inviter, None, seats=[inviter, invitee])
+            return True, f"{inviter} 和 {invitee} 同桌开一局 21 点", self._register(game)
         with self._lock:
             if self._by_user.get(inviter) or self._by_user.get(invitee):
                 return False, "有一方已经在别的对局里了", None
-        if kind == "bj":
-            return False, "21 点目前只支持和 Agent 庄家对局", None
         game = Game(inviter, invitee, None, kind=kind)
         return True, f"{inviter} 和 {invitee} 开局（{game_name(kind)}），{inviter} 执 X 先手", self._register(game)
 
@@ -461,10 +493,20 @@ class GameService:
             return False, None
         return True, invite["from"]
 
+    def remove_player(self, game, user_id: str) -> bool:
+        """把一个人从 21 点牌桌摘掉；返回桌上还剩不剩人。"""
+        if getattr(game, "kind", "") == "bj":
+            game.seats = [seat for seat in game.seats if seat.user != user_id]
+            game._normalise_turn()
+        with self._lock:
+            if self._by_user.get(user_id) == game.id:
+                self._by_user.pop(user_id, None)
+        return bool(getattr(game, "seats", [user_id]))
+
     def close(self, game) -> None:
         with self._lock:
             self._games.pop(game.id, None)
-            for player in (game.x_user, getattr(game, "o_user", None)):
+            for player in self._players_of(game):
                 if player and self._by_user.get(player) == game.id:
                     self._by_user.pop(player, None)
         game.cancelled = True
@@ -473,14 +515,15 @@ class GameService:
         """同一对玩家开新局：棋盘类交换先手，21 点换一副新牌。"""
         if getattr(game, "kind", "ttt") == "bj":
             from server.services.blackjack import BlackjackGame
-            return self._register(BlackjackGame(game.x_user, game.room_id))
+            seats = [s.user for s in getattr(game, "seats", [])] or [game.x_user]
+            return self._register(BlackjackGame(seats[0], game.room_id, seats=seats))
         new_game = Game(game.o_user, game.x_user, game.room_id, kind=game.kind)
         return self._register(new_game)
 
     def release(self, game) -> None:
         """结算后释放玩家名额：他们可以马上开新局，但棋局快照还留着给双方看结果。"""
         with self._lock:
-            for player in (game.x_user, getattr(game, "o_user", None)):
+            for player in self._players_of(game):
                 if player and self._by_user.get(player) == game.id:
                     self._by_user.pop(player, None)
 
@@ -499,6 +542,14 @@ class GameService:
     # ---------------------------------------------------------------- 战绩
     def record(self, game) -> None:
         kind = getattr(game, "kind", "ttt")
+        if kind == "bj":
+            with self._lock:
+                for seat in getattr(game, "seats", []):
+                    score = self._scores.setdefault(
+                        f"bj:{seat.user}", {"win": 0, "lose": 0, "draw": 0})
+                    if seat.result in score:
+                        score[seat.result] += 1
+            return
         with self._lock:
             for user, mark in ((game.x_user, "X"), (getattr(game, "o_user", None), "O")):
                 if not user:

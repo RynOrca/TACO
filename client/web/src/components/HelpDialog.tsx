@@ -10,6 +10,7 @@ const COMMANDS: { key: string; desc: string }[] = [
   { key: '/game start', desc: '和 Agent 下一局井字棋，你执 X 先手；每走一步 Agent 都会用工具落子' },
   { key: '/game start gomoku', desc: '和 Agent 下五子棋（15×15，五连获胜）；棋力靠启发式评分，模型只负责点评' },
   { key: '/game start bj', desc: '和 Agent 玩 21 点：只看得到自己的牌，庄家暗牌停牌后才揭示' },
+  { key: '/game invite 用户名 bj', desc: '把人拉上你的 21 点牌桌（最多 3 人同桌）；每个人只能看到自己的牌和其他人的张数' },
   { key: '/game hit / stand', desc: '21 点要牌 / 停牌' },
   { key: '/game invite 用户名 [gomoku]', desc: '邀请另一位成员对弈（默认井字棋，加 gomoku 就是五子棋）；其他人右栏可以直接观战' },
   { key: '/game accept / decline', desc: '接受或拒绝邀请（120 秒内有效）' },
