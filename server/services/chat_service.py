@@ -842,21 +842,67 @@ class ChatService:
             self.games.release(game)
             log_line(f"[Game] {user_id} 掉线，对局 {game.id} 判负收尾")
 
+    def _game_local_move(self, user_id: str, game, label: str) -> None:
+        """纯本地落子：不调用模型，几乎瞬间完成。适合演示时不想等模型的地方。"""
+        cell = game.auto_move()
+        if cell is None:
+            return
+        row, col = divmod(cell - 1, getattr(game, "size", 3))
+        where = f"{row + 1} 行 {col + 1} 列" if getattr(game, "size", 3) > 3 else f"第 {cell} 格"
+        text = f"我下在{where}（本地策略，未调用模型）。"
+        if game.over:
+            text += f"\n结果：{self._game_result_text(game)}"
+        if getattr(game, "kind", "ttt") != "gomoku":
+            text = f"{text}\n\n{game.render()}"
+
+        self._push_game(game, announce=False)
+        payload = {"type": "agent", "sender": "Agent", "msg": text,
+                   "status": "done", "steps": [], "scope": "group"}
+        try:
+            payload["id"] = chat_history.save_message(
+                self.group_room_id(), "Agent", text, "agent")
+        except Exception as e:
+            print(f"[Game] 落库失败: {e}")
+        self.users.broadcast(payload)
+        if game.over:
+            self._finish_game(game)
+        else:
+            self.users.broadcast({"type": "system", "msg": self._game_line(game, "本地策略落子")})
+
     def _game_agent_task(self, user_id: str, game) -> None:
-        """Agent 的一轮：读棋盘、用 game_move 落子、点评一句。"""
+        """Agent 的一轮落子。
+
+        三档速度（AGENT_GAME_FAST）：
+          0  普通请求：带思考链，约 3 秒一步
+          1  快路径：关思考 + 短超时，约 1.5 秒一步，仍由模型选点并点评
+          2  纯本地：启发式直接落子、不调用模型，几乎瞬间完成（会注明未调用模型）
+        """
         label = game_service.game_name(getattr(game, "kind", "ttt"))
+        if config.AGENT_GAME_FAST >= 2:
+            self._game_local_move(user_id, game, label)
+            return
+
+        # 给模型一个参考落点：不强制，但能大幅减少“落在已有棋子上”的无效重试
+        suggestion = ""
+        if getattr(game, "kind", "ttt") == "gomoku":
+            hint = game_service.best_gomoku_move(list(game.board), game.size, "O")
+            if hint is not None:
+                suggestion = f"参考落点：{hint}（你也可以选别的合法位置）。"
         prompt = (
             f"你在和用户 {user_id} 玩{label}。你执 O，对方执 X，对方先手。\n"
             f"当前棋盘（数字是空位）：\n{game.render()}\n"
             f"可落子位置：{game.legal_moves()[:60]}（共 {len(game.legal_moves())} 个）。\n"
+            f"{suggestion}\n"
             "规则：必须调用 game_move(cell) 落子，cell 只能从可落子位置里取；"
             "落子后用一句话点评这步棋，不要输出完整棋谱，也不要替玩家落子。"
         )
         spec, tools = game_service.game_tools(game, user_id)
         try:
+            # 落子是"每步都要等"的调用，走快路径：不要思考链、短超时
             reply, steps = agent_core.run_detailed(
-                prompt, max_steps=4, room_id=self.group_room_id(),
-                user_id=user_id, extra_tools=(spec, tools))
+                prompt, max_steps=2, room_id=self.group_room_id(),
+                user_id=user_id, extra_tools=(spec, tools),
+                fast=config.AGENT_GAME_FAST)
         except Exception as e:
             print(f"[Game] Agent 调用异常: {e}")
             reply, steps = f"Agent 调用失败：{e}", []

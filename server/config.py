@@ -44,6 +44,12 @@ FILE_EXT_ALLOWED = tuple(
 # 管理员（能禁言别人）：逗号分隔，留空则没人有权限
 ADMIN_USERS = [name.strip() for name in os.getenv("ADMIN_USERS", "").split(",") if name.strip()]
 
+# 游戏里的 Agent 落子速度档位：0 普通请求 / 1 快路径（关思考，默认）/ 2 纯本地不调模型
+try:
+    AGENT_GAME_FAST = int(os.getenv("AGENT_GAME_FAST", "1") or 1)
+except ValueError:
+    AGENT_GAME_FAST = 1
+
 AGENT_TIMEOUT = _int("AGENT_TIMEOUT", 60)
 AGENT_MAX_STEPS = _int("AGENT_MAX_STEPS", 5)
 MAX_HISTORY = _int("MAX_HISTORY", 20)

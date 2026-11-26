@@ -726,6 +726,7 @@ python -m client.bridge
 | `LLM_MODEL_ID` | 空 | 模型名，如 `deepseek-chat` |
 | `TAVILY_API_KEY` | 空 | 联网搜索工具用；留空只影响该工具 |
 | `AGENT_MAX_STEPS` | `5` | ReAct 最大步数 |
+| `AGENT_GAME_FAST` | `1` | 游戏落子速度：`0` 普通请求（约 3s/步）、`1` 快路径（关思考 + 320 token + 12s 超时，约 1.5s/步）、`2` 纯本地不调模型（瞬间，回答注明未调用模型） |
 | `AGENT_TIMEOUT` | `60` | 目前只用于失败提示文案，未真正中断请求 |
 | `AGENT_AUTO_SUMMARY_SECONDS` | `0` | 启动时自动创建的 summary 任务周期（秒），0 关闭 |
 | `AGENT_AUTO_SUMMARY_MIN_MESSAGES` | `3` | 定时总结的"新消息条数"门槛 |
