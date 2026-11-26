@@ -51,6 +51,8 @@ export interface State {
   gameFocus: string | null;
   /** 收到的对局邀请 */
   gameInvite: GameInvite | null;
+  /** 界面布局：聊天 / 专注游戏 / 剧场（全屏游戏 + 聊天浮层） */
+  layout: 'chat' | 'game' | 'theater';
 }
 
 export type Action =
@@ -68,6 +70,7 @@ export type Action =
   | { type: 'include-private'; value: boolean }
   | { type: 'game-focus'; id: string | null }
   | { type: 'game-invite-clear' }
+  | { type: 'layout'; mode: 'chat' | 'game' | 'theater' }
   | { type: 'help'; open: boolean }
   | { type: 'latency'; ms: number | null }
   | { type: 'local'; kind: 'system' | 'error'; text: string };
@@ -572,6 +575,9 @@ export function reducer(state: State, action: Action): State {
     case 'game-invite-clear':
       return { ...state, gameInvite: null };
 
+    case 'layout':
+      return { ...state, layout: action.mode };
+
     case 'latency':
       return { ...state, latency: { ms: action.ms, at: Date.now() } };
 
@@ -612,6 +618,7 @@ export function initialState(): State {
     games: {},
     gameFocus: null,
     gameInvite: null,
+    layout: 'chat',
   };
 }
 

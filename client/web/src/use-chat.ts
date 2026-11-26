@@ -24,6 +24,7 @@ export interface Chat {
   gameDecline: () => void;
   gameFocus: (id: string) => void;
   gameRematch: () => void;
+  setLayout: (mode: 'chat' | 'game' | 'theater') => void;
   setIncludePrivate: (value: boolean) => void;
   setHelp: (open: boolean) => void;
   recall: (id: number) => void;
@@ -326,6 +327,11 @@ export function useChat(): Chat {
     send({ type: 'game', text: 'decline' });
   }, [send]);
 
+  const setLayout = useCallback(
+    (mode: 'chat' | 'game' | 'theater') => dispatch({ type: 'layout', mode }),
+    [],
+  );
+
   const gameRematch = useCallback(() => {
     if (!send({ type: 'game', text: 'rematch' })) {
       dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，再来一局的请求没有发出去' });
@@ -381,6 +387,20 @@ export function useChat(): Chat {
     return () => window.clearTimeout(timer);
   }, [state.me, state.active, state.threads, send]);
 
+  // 布局：有我的对局或收到邀请就进"专注游戏"，棋局关掉后回聊天
+  const gamesKey = Object.entries(state.games)
+    .map(([id, g]) => `${id}:${g.over ? 'o' : 'r'}`)
+    .join(',');
+  useEffect(() => {
+    const mine = Object.values(latest.current.games).find(
+      (g) => latest.current.me && (g.players.X === latest.current.me || g.players.O === latest.current.me),
+    );
+    const invite = latest.current.gameInvite;
+    const layout = latest.current.layout;
+    if ((mine || invite) && layout === 'chat') dispatch({ type: 'layout', mode: 'game' });
+    if (!mine && !invite && layout === 'game') dispatch({ type: 'layout', mode: 'chat' });
+  }, [gamesKey, state.gameInvite, state.link]);
+
   // 延迟监测：每 5 秒 ping 一次，15 秒没有 pong 就当超时
   useEffect(() => {
     if (state.link !== 'open') {
@@ -435,6 +455,7 @@ export function useChat(): Chat {
     gameDecline,
     gameFocus,
     gameRematch,
+    setLayout,
     setIncludePrivate,
     setHelp,
     recall,

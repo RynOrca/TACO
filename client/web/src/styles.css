@@ -65,6 +65,106 @@ textarea {
   height: 100%;
   background: var(--surface);
   border-top: 3px solid var(--ink);
+  transition: grid-template-columns 0.34s cubic-bezier(0.22, 0.7, 0.2, 1);
+}
+
+/* 专注游戏：左栏收成图标条、聊天压到 320px，中间让给牌桌 */
+.app[data-layout="game"] {
+  grid-template-columns: 46px 320px minmax(0, 1fr);
+}
+
+/* 专注模式不显示右侧标签页：棋盘已经占满，赛况放在牌桌底部 */
+.app[data-layout="game"] .panel {
+  display: none;
+}
+
+/* 剧场：只留牌桌，聊天变成右下角浮层 */
+.app[data-layout="theater"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app[data-layout="theater"] .sidebar {
+  display: none;
+}
+
+.app[data-layout="theater"] .panel {
+  display: none;
+}
+
+.app[data-layout="theater"] .conv {
+  display: flex;
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  width: 320px;
+  height: 300px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  box-shadow: 5px 5px 0 rgba(16, 15, 13, 0.14);
+}
+
+.app[data-layout="theater"] .conv .chead {
+  padding: 8px 12px;
+}
+
+.app[data-layout="theater"] .conv .chead h1 {
+  font-size: 14px;
+}
+
+.app[data-layout="theater"] .conv .composer {
+  padding: 8px 12px 10px;
+}
+
+/* ---------- 左栏折叠 ---------- */
+.sidebar.collapsed {
+  align-items: center;
+  padding: 8px 0;
+  gap: 4px;
+}
+
+.sidebar.collapsed .brand {
+  padding: 2px 0 8px;
+  justify-content: center;
+  gap: 0;
+}
+
+.sidebar.collapsed .brand .name,
+.sidebar.collapsed .brand .sub,
+.sidebar.collapsed .conn,
+.sidebar.collapsed .sect,
+.sidebar.collapsed .me .who,
+.sidebar.collapsed .me .switch {
+  display: none;
+}
+
+.sidebar.collapsed .list {
+  padding: 4px 0;
+  justify-items: center;
+}
+
+.sidebar.collapsed .list-empty,
+.sidebar.collapsed .panel-empty {
+  display: none;
+}
+
+.sidebar.collapsed .item {
+  grid-template-columns: 26px;
+  justify-items: center;
+  padding: 5px;
+  gap: 0;
+}
+
+.sidebar.collapsed .item .t,
+.sidebar.collapsed .item .meta {
+  display: none;
+}
+
+.sidebar.collapsed .me {
+  margin-top: auto;
+  padding: 8px 0;
+  justify-content: center;
+  width: 100%;
 }
 
 /* ------------------------------------------------------------ 侧栏 */
@@ -1036,6 +1136,200 @@ textarea {
 .send {
   margin-left: auto;
   padding: 4px 16px;
+}
+
+/* ------------------------------------------------------------ 游戏大厅（专注模式） */
+.app[data-layout="game"] .chead .tools,
+.app[data-layout="game"] .box-hint,
+.app[data-layout="theater"] .chead .tools,
+.app[data-layout="theater"] .chead .meta,
+.app[data-layout="theater"] .box-hint {
+  display: none;
+}
+
+/* 剧场模式棋盘再大一号 */
+.app[data-layout="theater"] .game-board-lg {
+  width: min(66vh, 640px);
+}
+
+.app[data-layout="game"] .chead {
+  padding: 10px 16px;
+}
+
+.app[data-layout="game"] .chead h1 {
+  font-size: 15px;
+}
+
+.app[data-layout="game"] .composer {
+  padding: 10px 16px 12px;
+}
+
+.arena {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--ink);
+  background: radial-gradient(120% 80% at 50% 0%, #fbfbf6 0%, var(--surface) 46%, #f7f7f1 100%);
+}
+
+.arena-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--ink);
+  background: var(--surface);
+}
+
+.arena-top .gname {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.arena-top .gsub {
+  font: 400 10px/1.4 var(--mono);
+  color: var(--faint);
+  letter-spacing: 0.05em;
+}
+
+.arena-top .vs {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.side-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  font-size: 11.5px;
+}
+
+.side-tag b {
+  font-size: 12px;
+}
+
+.side-tag .dot {
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+}
+
+.side-tag.turn {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--lime-soft);
+}
+
+.side-tag.turn .dot {
+  background: var(--accent);
+  animation: blink 1.2s steps(2, end) infinite;
+}
+
+.vs-x {
+  font: 400 10px/1 var(--mono);
+  color: var(--faint);
+  letter-spacing: 0.1em;
+}
+
+.arena-tools {
+  display: flex;
+  gap: 6px;
+  padding-left: 12px;
+  border-left: 1px solid var(--rule-strong);
+}
+
+.arena-tools .btn {
+  padding: 3px 10px;
+  font-size: 10.5px;
+}
+
+.arena-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.arena-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.arena-empty .dim {
+  color: var(--faint);
+  font: 400 10.5px/1.5 var(--mono);
+}
+
+.arena-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 22px 12px;
+  border-top: 1px solid var(--ink);
+  background: var(--surface);
+}
+
+.arena-turn {
+  font: 400 11px/1.6 var(--mono);
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.arena-turn.mine {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.arena-status .dim {
+  font: 400 10px/1.6 var(--mono);
+  color: var(--faint);
+}
+
+.arena-status .rematch {
+  flex: 1 1 100%;
+  margin-top: 0;
+}
+
+/* 大厅里的大棋盘 */
+.game-board-lg {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: min(60vh, 540px);
+  aspect-ratio: 1;
+  padding: 14px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.game-board-lg .game-cell {
+  font-size: 20px;
+  color: var(--faint);
+  border: 1px solid var(--rule-strong);
+}
+
+.game-board-lg .game-cell.x,
+.game-board-lg .game-cell.o {
+  font-size: 44px;
+  color: var(--ink);
+}
+
+.game-board-lg .game-cell:not(:disabled):hover {
+  background: var(--accent-tint);
+  border-color: var(--ink);
 }
 
 /* ------------------------------------------------------------ 右栏 */

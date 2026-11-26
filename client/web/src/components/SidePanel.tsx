@@ -32,6 +32,7 @@ interface Props {
   onGameDecline: () => void;
   onGameFocus: (id: string) => void;
   onGameRematch: () => void;
+  onEnterArena: () => void;
 }
 
 export function SidePanel({
@@ -48,6 +49,7 @@ export function SidePanel({
   onGameDecline,
   onGameFocus,
   onGameRematch,
+  onEnterArena,
 }: Props) {
   const [tab, setTab] = useState<Tab>('room');
 
@@ -223,6 +225,11 @@ export function SidePanel({
               onDecline={onGameDecline}
               onRematch={onGameRematch}
             />
+            {(mineGame || focusedGame) && (
+              <button type="button" className="btn primary enter-arena" onClick={onEnterArena}>
+                进入牌桌
+              </button>
+            )}
             <section>
               <h2>邀请对弈</h2>
               {others.length === 0 && <p className="panel-empty">当前没有其他在线成员</p>}
