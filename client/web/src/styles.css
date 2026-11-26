@@ -2007,6 +2007,61 @@ textarea {
   white-space: nowrap;
 }
 
+/* 结束后的操作区：再来一局 / 退出 */
+.rematch {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+}
+
+.rematch-state {
+  display: grid;
+  gap: 5px;
+  font: 400 10.5px/1.6 var(--mono);
+  color: var(--muted);
+}
+
+.rematch-state b {
+  color: var(--ink);
+}
+
+.rematch-state .ok {
+  color: var(--ok);
+}
+
+.rematch-state .dim {
+  color: var(--faint);
+}
+
+.rematch-bar {
+  display: block;
+  height: 3px;
+  border: 1px solid var(--ink);
+  background: var(--surface2);
+}
+
+.rematch-bar i {
+  display: block;
+  height: 100%;
+  background: var(--lime);
+  transition: width 0.4s linear;
+}
+
+.rematch-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.rematch-actions .btn {
+  flex: 1;
+  padding: 5px 8px;
+  text-align: center;
+  font-size: 11px;
+}
+
 .game-score {
   margin: 8px 0;
   font: 400 11px/1.5 var(--mono);

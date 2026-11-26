@@ -676,21 +676,55 @@ class ChatService:
                 return {"type": "system", "msg": head + "\n" + self._game_line(game)}
             return {"type": "system", "msg": head + "\n当前没有进行中的对局。"}
 
+        if action == "rematch":
+            game = self.games.current(ctx.user_id)
+            if game is None:
+                finished = [g for g in self.games.finished_for(ctx.user_id) if not g.vs_agent]
+                game = max(finished, key=lambda g: g.updated_at, default=None)
+            if game is None:
+                return err("NO_GAME", "没有可重开的对局，先 /game start 或 /game invite 用户名")
+            if not game.over:
+                return err("BAD_STATE", "这一局还没结束")
+            if game.vs_agent:
+                # 人和 Agent：不用等谁确认，直接开新局
+                self._close_game(game)
+                fresh = self.games.start_vs_agent(ctx.user_id, ctx.room_id)
+                self._push_game(fresh, note=f"{ctx.user_id} 又来一局（对手：Agent）")
+                return None
+
+            ready, detail = game.vote_rematch(ctx.user_id)
+            if not ready:
+                self._push_game(game, announce=False)
+                self.users.broadcast({"type": "system", "msg": (
+                    f"[井字棋] {ctx.user_id} 想再来一局 · {detail}")})
+                return None
+
+            # 双方都确认：关掉旧局，换先手开新局
+            self._close_game(game)
+            fresh = self.games.rematch(game)
+            self._push_game(fresh, note=(
+                f"再来一局 · {fresh.players()['X']}（X）vs {fresh.players()['O']}（O）"))
+            return None
+
         if action == "quit":
             game = self.games.current(ctx.user_id)
-            if game is not None and game.over:
-                self._close_game(game)
-                return {"type": "system", "msg": "已关闭上一局。"}
             if game is None:
-                return {"type": "system", "msg": "当前没有进行中的对局。"}
+                # 结束后玩家名额已释放：从"已结束但还留着"的棋局里找我那一盘
+                finished = [g for g in self.games.finished_for(ctx.user_id) if not g.vs_agent]
+                game = max(finished, key=lambda g: g.updated_at, default=None)
+                if game is None:
+                    return {"type": "system", "msg": "当前没有进行中的对局。"}
+                self._close_both(ctx.user_id, game, "退出了对局")
+                return {"type": "system", "msg": "已退出，这一局对双方都关闭了。"}
             if not game.over and not game.vs_agent and game.forfeit(ctx.user_id):
-                # 人对人中途退出：判对方胜，棋局留给双方看结果
+                # 人对人中途退出：判对方胜，然后把这一局对双方关闭
                 self.games.record(game)
-                self._push_game(game, note=f"{ctx.user_id} 退出了对局")
-                self._close_game(game)
+                self._push_game(game, note=f"{ctx.user_id} 认输")
+                self._close_both(ctx.user_id, game, "认输退出")
+                return {"type": "system", "msg": "你已认输退出，这一局对双方都结束了。"}
             else:
-                self.users.broadcast({"type": "game", "action": "closed", "game_id": game.id})
-                self.games.drop(ctx.user_id)
+                # 人对 Agent：只关掉自己这一局
+                self._close_game(game)
                 self.users.broadcast({"type": "system", "msg": (
                     f"[井字棋] {ctx.user_id} 退出了对局。{self.games.score_text(ctx.user_id)}")})
             return None
@@ -710,11 +744,16 @@ class ChatService:
         self._push_game(game, note="本局结束")
         self.games.release(game)
 
-    def _close_game(self, game) -> None:
-        for player in (game.x_user, game.o_user):
-            if player:
-                self.games.drop(player)
+    def _close_both(self, user_id: str, game, reason: str) -> None:
+        """人对人：一个人点退出，两个人的棋局一起关掉。"""
         self.users.broadcast({"type": "game", "action": "closed", "game_id": game.id})
+        self.games.close(game)
+        self.users.broadcast({"type": "system", "msg": (
+            f"[井字棋] {user_id} {reason}，本局已结束。{self.games.score_text(user_id)}")})
+
+    def _close_game(self, game) -> None:
+        self.users.broadcast({"type": "game", "action": "closed", "game_id": game.id})
+        self.games.close(game)
 
     def handle_disconnect(self, user_id: str) -> None:
         """连接断开（主动退出或被心跳回收）：对局里的一方掉线，判对方胜。"""
@@ -725,10 +764,9 @@ class ChatService:
         if game is None or game.over:
             return
         if game.vs_agent:
-            self.games.drop(user_id)
-            self.users.broadcast({"type": "game", "action": "closed", "game_id": game.id})
+            self._close_game(game)
             self.users.broadcast({"type": "system", "msg": (
-                f"[井字棋] {user_id} 掉线，对局已取消" )})
+                f"[井字棋] {user_id} 掉线，对局已取消")})
             return
         if game.forfeit(user_id):
             self.games.record(game)

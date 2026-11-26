@@ -31,6 +31,7 @@ interface Props {
   onGameAccept: () => void;
   onGameDecline: () => void;
   onGameFocus: (id: string) => void;
+  onGameRematch: () => void;
 }
 
 export function SidePanel({
@@ -46,6 +47,7 @@ export function SidePanel({
   onGameAccept,
   onGameDecline,
   onGameFocus,
+  onGameRematch,
 }: Props) {
   const [tab, setTab] = useState<Tab>('room');
 
@@ -219,6 +221,7 @@ export function SidePanel({
               onFocus={onGameFocus}
               onAccept={onGameAccept}
               onDecline={onGameDecline}
+              onRematch={onGameRematch}
             />
             <section>
               <h2>邀请对弈</h2>

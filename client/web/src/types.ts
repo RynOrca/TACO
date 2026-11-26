@@ -68,6 +68,7 @@ export interface ServerMsg {
   legal?: number[];
   spectators?: number;
   scores?: Record<string, { win: number; lose: number; draw: number }>;
+  rematch?: { votes: string[]; deadline: number; window: number };
   from?: string;
   ttl?: number;
 }
@@ -103,6 +104,8 @@ export interface GameState {
   legal: number[];
   spectators: number;
   scores: Record<string, { win: number; lose: number; draw: number }>;
+  /** 结束后的"再来一局"投票：双方都在窗口内确认才开新局 */
+  rematch: { votes: string[]; deadline: number; window: number };
 }
 
 export interface GameInvite {

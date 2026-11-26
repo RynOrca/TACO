@@ -236,6 +236,17 @@ button{font:inherit;color:inherit}
 .eye-toggle{display:flex;align-items:center;gap:6px;font:400 10px/1.4 var(--mono);color:var(--muted);cursor:pointer;margin-top:6px}
 
 /* 底部比分 / 战绩条 */
+.rematch{position:relative;z-index:2;display:flex;align-items:center;gap:12px;
+  margin:0 22px 12px;padding:9px 12px;border:1px solid var(--ink);background:var(--surface);box-shadow:var(--shadow)}
+.rematch .txt{font:400 10.5px/1.6 var(--mono);color:var(--muted)}
+.rematch .txt b{color:var(--ink)}
+.rematch .bar{flex:1;max-width:220px;height:3px;border:1px solid var(--ink);background:var(--surface2)}
+.rematch .bar i{display:block;height:100%;width:60%;background:var(--lime)}
+.rematch .btn{padding:4px 14px;border:1px solid var(--ink);background:var(--surface);font:400 11px/1.6 var(--mono);cursor:pointer}
+.rematch .btn.primary{background:var(--ink);color:var(--surface)}
+.rematch .btn.ghost{border-color:var(--rule2);color:var(--muted)}
+.rematch .done{color:var(--ok)}
+
 .arena-foot{position:relative;z-index:2;display:flex;align-items:center;gap:14px;padding:10px 22px;border-top:1px solid var(--ink);background:var(--surface);
   font:400 10.5px/1.6 var(--mono);color:var(--muted)}
 .arena-foot b{color:var(--ink)}
@@ -266,7 +277,8 @@ button{font:inherit;color:inherit}
 .seatrow .st.on{color:var(--ok)}
 .chatg{flex:1;min-height:0;display:flex;flex-direction:column;border-top:1px solid var(--ink)}
 .chatg .hd{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--rule);font:400 9.5px/1.6 var(--mono);letter-spacing:.16em;color:var(--faint)}
-.chatg .lines{flex:1;overflow-y:auto;padding:6px 12px;display:grid;gap:6px;font-size:11.5px}
+.chatg .lines{flex:1;overflow-y:auto;padding:6px 12px;display:grid;gap:6px;
+  align-content:start;font-size:11.5px;line-height:1.55}
 .chatg .lines b{font-weight:600}
 .chatg .lines .g{color:var(--faint)}
 .chatg .inp{padding:8px 12px;border-top:1px solid var(--rule);font-size:11.5px;color:var(--faint)}
@@ -385,6 +397,13 @@ button{font:inherit;color:inherit}
           <label class="eye-toggle"><input type="checkbox" id="blind"> 模拟 Agent 视角（把你的手牌遮住）</label>
         </div>
       </div>
+    </div>
+
+    <div class="rematch">
+      <span class="txt">双方都点<b>再来一局</b>才会开新局 · 还剩 <b>8s</b></span>
+      <span class="bar"><i></i></span>
+      <button class="btn primary">再来一局</button>
+      <button class="btn ghost">退出（双方一起结束）</button>
     </div>
 
     <div class="arena-foot">

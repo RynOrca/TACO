@@ -25,6 +25,8 @@ WIN_LINES = (
 RESULT_CN = {"win": "你赢了", "lose": "Agent 赢了", "draw": "平局"}
 # 邀请有效期：超过就作废，免得一小时后突然冒出个邀请
 INVITE_TTL_SECONDS = 120
+# 人对人结束后"再来一局"的确认窗口：双方都要在这么长时间内点确认
+REMATCH_WINDOW_SECONDS = 10
 
 
 def render_board(board: List[str]) -> str:
@@ -95,6 +97,9 @@ class Game:
         self.cancelled = False
         self.created_at = time.time()
         self.updated_at = time.time()
+        # 结算后的"再来一局"投票：双方都在窗口内确认才开新局
+        self.rematch_votes: set = set()
+        self.rematch_deadline: Optional[float] = None
         self._lock = threading.Lock()
 
     # ---------------------------------------------------------------- 基本信息
@@ -137,6 +142,11 @@ class Game:
             "result": self.result,
             "winner": self.winner,
             "legal": self.legal_moves(),
+            "rematch": {
+                "votes": sorted(self.rematch_votes),
+                "deadline": int(self.rematch_deadline * 1000) if self.rematch_deadline else 0,
+                "window": REMATCH_WINDOW_SECONDS,
+            },
         }
 
     # ---------------------------------------------------------------- 落子
@@ -180,6 +190,38 @@ class Game:
                 return True, "draw"
             self.turn = "O" if mark == "X" else "X"
             return True, "ok"
+
+    # ---------------------------------------------------------------- 再来一局
+    def rematch_remaining(self) -> float:
+        """距离这轮确认窗口结束还有多少秒（没开窗口就是 0）。"""
+        if self.rematch_deadline is None:
+            return 0.0
+        return max(0.0, self.rematch_deadline - time.time())
+
+    def vote_rematch(self, user_id: str) -> Tuple[bool, str]:
+        """投票"再来一局"。窗口过期或新一轮开始时重新计时。"""
+        with self._lock:
+            if not self.over:
+                return False, "这一局还没结束"
+            if self.mark_of(user_id) is None:
+                return False, "这盘棋不是你参与的"
+            if self.rematch_deadline is None or time.time() > self.rematch_deadline:
+                # 新窗口：清掉上一轮的票，重新倒计时
+                self.rematch_votes = set()
+                self.rematch_deadline = time.time() + REMATCH_WINDOW_SECONDS
+            self.rematch_votes.add(user_id)
+            both = {self.x_user, self.o_user} and all(
+                u in self.rematch_votes for u in (self.x_user, self.o_user) if u
+            )
+        if both:
+            return True, "双方都确认了，开新局"
+        other = self.o_user if user_id == self.x_user else self.x_user
+        return False, f"等你和 {other} 都确认（还有 {int(self.rematch_remaining())} 秒）"
+
+    def clear_rematch(self) -> None:
+        with self._lock:
+            self.rematch_votes = set()
+            self.rematch_deadline = None
 
     def forfeit(self, loser_user: str) -> bool:
         """一方掉线/退出：判对方胜。返回是否真的改动了棋局。"""
@@ -310,6 +352,20 @@ class GameService:
         if game is not None:
             game.cancelled = True
         return game
+
+    def close(self, game: Game) -> None:
+        """彻底关掉一局（双方都退出、或已被新局替代）。"""
+        with self._lock:
+            self._games.pop(game.id, None)
+            for player in (game.x_user, game.o_user):
+                if player and self._by_user.get(player) == game.id:
+                    self._by_user.pop(player, None)
+        game.cancelled = True
+
+    def rematch(self, game: Game) -> Game:
+        """用同一对玩家开新的一局，双方交换先手。"""
+        new_game = Game(game.o_user, game.x_user, game.room_id)
+        return self._register(new_game)
 
     def release(self, game: Game) -> None:
         """结算后释放玩家名额：他们可以马上开新局，但棋局快照还留着给双方看结果。"""

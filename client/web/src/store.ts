@@ -437,6 +437,7 @@ function onServer(state: State, msg: ServerMsg): State {
         legal: msg.legal ?? [],
         spectators: msg.spectators ?? 0,
         scores: msg.scores ?? {},
+        rematch: msg.rematch ?? { votes: [], deadline: 0, window: 10 },
       };
       // 自己刚参与的这盘自动聚焦；已经聚焦的不动，避免观战时被别人的落子抢走
       const mine = Boolean(state.me) &&

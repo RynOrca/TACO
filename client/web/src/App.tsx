@@ -79,6 +79,7 @@ export default function App() {
         onGameAccept={chat.gameAccept}
         onGameDecline={chat.gameDecline}
         onGameFocus={chat.gameFocus}
+        onGameRematch={chat.gameRematch}
       />
 
       {state.auth.open && (

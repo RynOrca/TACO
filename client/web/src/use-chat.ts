@@ -23,6 +23,7 @@ export interface Chat {
   gameAccept: () => void;
   gameDecline: () => void;
   gameFocus: (id: string) => void;
+  gameRematch: () => void;
   setIncludePrivate: (value: boolean) => void;
   setHelp: (open: boolean) => void;
   recall: (id: number) => void;
@@ -325,6 +326,12 @@ export function useChat(): Chat {
     send({ type: 'game', text: 'decline' });
   }, [send]);
 
+  const gameRematch = useCallback(() => {
+    if (!send({ type: 'game', text: 'rematch' })) {
+      dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，再来一局的请求没有发出去' });
+    }
+  }, [send]);
+
   const gameFocus = useCallback(
     (id: string) => dispatch({ type: 'game-focus', id }),
     [],
@@ -427,6 +434,7 @@ export function useChat(): Chat {
     gameAccept,
     gameDecline,
     gameFocus,
+    gameRematch,
     setIncludePrivate,
     setHelp,
     recall,
