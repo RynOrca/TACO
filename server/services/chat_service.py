@@ -799,13 +799,16 @@ class ChatService:
         if action == "rematch":
             game = self.games.current(ctx.user_id)
             if game is None:
-                finished = [g for g in self.games.finished_for(ctx.user_id) if not g.vs_agent]
+                # 结算后玩家名额已释放：从"已结束但还留着"的棋局里找我那一盘
+                # （人机局也算，否则 21 点/单机井字棋结束后没法再来一局）
+                finished = self.games.finished_for(ctx.user_id)
                 game = max(finished, key=lambda g: g.updated_at, default=None)
             if game is None:
                 return err("NO_GAME", "没有可重开的对局，先 /game start 或 /game invite 用户名")
             if not game.over:
                 return err("BAD_STATE", "这一局还没结束")
-            if game.vs_agent:
+            # 21 点即使对手是 Agent 也可能是一桌人：要等同桌都确认
+            if game.vs_agent and getattr(game, "kind", "ttt") != "bj":
                 # 人和 Agent：不用等谁确认，直接按同一棋种开新局
                 kind = getattr(game, "kind", "ttt")
                 self._close_game(game)
@@ -830,24 +833,21 @@ class ChatService:
         if action == "quit":
             current_game = self.games.current(ctx.user_id)
             if current_game is not None and getattr(current_game, "kind", "") == "bj":
-                seats = [s for s in current_game.seats if s.user != ctx.user_id]
-                if seats:
-                    current_game.seats = seats
-                    current_game._normalise_turn()
+                if self.games.remove_player(current_game, ctx.user_id):
                     self._push_game(current_game, note=f"{ctx.user_id} 离开了牌桌", announce=True)
-                    self.games.drop(ctx.user_id)
                     return {"type": "system", "msg": "你已离开牌桌"}
                 self._close_game(current_game)
                 return {"type": "system", "msg": "你已离开牌桌（这张桌没人了，已关闭）"}
             game = current_game
             if game is None:
                 # 结束后玩家名额已释放：从"已结束但还留着"的棋局里找我那一盘
-                finished = [g for g in self.games.finished_for(ctx.user_id) if not g.vs_agent]
+                finished = self.games.finished_for(ctx.user_id)
                 game = max(finished, key=lambda g: g.updated_at, default=None)
                 if game is None:
                     return {"type": "system", "msg": "当前没有进行中的对局。"}
-                self._close_both(ctx.user_id, game, "退出了对局")
-                return {"type": "system", "msg": "已退出，这一局对双方都关闭了。"}
+                # 这一局已经结束，关闭只是把结果面板从双方界面上清掉
+                self._close_both(ctx.user_id, game, "关掉了这一局")
+                return {"type": "system", "msg": "已关闭这一局。"}
             if not game.over and not game.vs_agent and game.forfeit(ctx.user_id):
                 # 人对人中途退出：判对方胜，然后把这一局对双方关闭
                 self.games.record(game)

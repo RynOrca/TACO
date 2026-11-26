@@ -2796,6 +2796,15 @@ textarea {
   gap: 6px;
 }
 
+.rematch-actions.center {
+  justify-content: center;
+}
+
+.rematch-actions.center .btn {
+  flex: 0 0 auto;
+  padding: 4px 18px;
+}
+
 .rematch-actions .btn {
   flex: 1;
   padding: 5px 8px;

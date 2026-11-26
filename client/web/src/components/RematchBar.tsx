@@ -23,12 +23,14 @@ export function RematchBar({
   if (game.vs_agent) {
     return (
       <div className="rematch">
-        <button type="button" className="btn primary" onClick={onRematch}>
-          再来一局
-        </button>
-        <button type="button" className="btn" onClick={onQuit}>
-          关闭
-        </button>
+        <div className="rematch-actions center">
+          <button type="button" className="btn primary" onClick={onRematch}>
+            再来一局
+          </button>
+          <button type="button" className="btn" onClick={onQuit}>
+            关闭
+          </button>
+        </div>
       </div>
     );
   }
