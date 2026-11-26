@@ -43,8 +43,10 @@ SUMMARY_PROMPT = (
 )
 
 GAME_HELP = chr(10).join((
-    "井字棋：",
-    "  /game start            和 Agent 下一局（你执 X 先手）",
+    "棋牌室（井字棋 / 五子棋 / 21 点）：",
+    "  /game start            和 Agent 下一局（默认井字棋）",
+    "  /game start gomoku     和 Agent 下五子棋（15×15，五连获胜）",
+    "  /game start bj         和 Agent 玩 21 点（你只知道自己的牌）",
     "  /game invite 用户名     邀请另一位成员对弈（对方 /game accept 接受）",
     "  /game accept | decline  接受 / 拒绝邀请",
     "  /game move 5           下在第 5 格（1-9，从左到右、从上到下）",
@@ -525,17 +527,17 @@ class ChatService:
         players = {u for u in (game.x_user, game.o_user) if u}
         return max(0, len(online - players))
 
-    def _game_state(self, game) -> dict:
-        """结构化棋局状态。广播给房间里所有人：参与者能点，其他人只读。"""
-        snap = game.snapshot()
-        snap["game_id"] = snap.pop("id")
-        return {
-            "type": "game",
-            "action": "state",
-            **snap,
-            "spectators": self._spectators(game),
-            "scores": {u: self.games.score(u) for u in (game.x_user, game.o_user) if u},
-        }
+    def _game_state(self, game, viewer: Optional[str] = None) -> dict:
+        """按视角裁剪后的结构化状态。21 点的暗牌在别人的视图里根本不存在。"""
+        snap = game.view_for(viewer)
+        snap["type"] = "game"
+        snap["action"] = "state"
+        snap["game_id"] = game.id
+        snap["spectators"] = self._spectators(game)
+        kind = getattr(game, "kind", "ttt")
+        snap["scores"] = {u: self.games.score(u, kind)
+                          for u in (game.x_user, game.o_user) if u}
+        return snap
 
     @staticmethod
     def _game_result_text(game) -> str:
@@ -545,16 +547,23 @@ class ChatService:
 
     def _game_line(self, game, note: str = "") -> str:
         players = game.players()
-        head = f"[井字棋] {players['X']} vs {players['O']}"
+        label = game_service.game_name(getattr(game, "kind", "ttt"))
+        head = f"[{label}] {players['X']} vs {players['O']}"
         if note:
             head += f" · {note}"
         if game.over:
             return f"{head} · 结果：{self._game_result_text(game)}"
+        if getattr(game, "kind", "ttt") == "bj":
+            return f"{head} · 轮到你决策"
         return f"{head} · 轮到 {players[game.turn]}"
 
     def _push_game(self, game, note: str = "", announce: bool = True) -> None:
-        """推棋局状态给所有人，再补一行简短提示（不打整个棋谱，免得刷屏）。"""
-        self.users.broadcast(self._game_state(game))
+        """按人裁剪后推送牌桌状态。
+
+        棋类大家看到的是同一份；21 点的暗牌只发给本人，其他人的视图里根本没这张牌。
+        """
+        for user in self.users.online_users():
+            self.users.send_to(user, self._game_state(game, user))
         if announce:
             self.users.broadcast({"type": "system", "msg": self._game_line(game, note)})
 
@@ -581,8 +590,16 @@ class ChatService:
 
         # ---------------- 跟 Agent 开一局 ----------------
         if action == "start":
+            kind = (rest.strip().lower() or "ttt")
+            if kind in ("ttt", "井字棋"):
+                kind = "ttt"
+            elif kind in ("gomoku", "五子棋", "gomoku5"):
+                kind = "gomoku"
+            elif kind in ("bj", "blackjack", "21", "21点"):
+                kind = "bj"
+            else:
+                return err("BAD_PARAM", "支持：/game start、/game start gomoku、/game start bj")
             self.games.prune()
-            # 上一局已经结束（还留着给双方看结果）：开新局时清掉
             for finished in self.games.finished_for(ctx.user_id):
                 self._close_game(finished)
             current = self.games.current(ctx.user_id)
@@ -590,28 +607,38 @@ class ChatService:
                 ctx.send(self._game_state(current))
                 return {"type": "system",
                         "msg": "你还有一局没下完：\n" + self._game_line(current)}
-            game = self.games.start_vs_agent(ctx.user_id, ctx.room_id)
-            self._push_game(game, note=f"{ctx.user_id} 开局，执 X 先手（对手：Agent）")
+            game = self.games.start_vs_agent(ctx.user_id, ctx.room_id, kind)
+            label = game_service.game_name(kind)
+            self._push_game(game, note=f"{ctx.user_id} 开局（{label}，对手：Agent）")
             return None
 
         # ---------------- 邀请另一位成员 ----------------
         if action == "invite":
             self.games.prune()
-            target = rest.strip()
+            parts = rest.split()
+            target = parts[0] if parts else ""
+            kind = parts[1].lower() if len(parts) > 1 else "ttt"
+            if kind in ("gomoku", "五子棋"):
+                kind = "gomoku"
+            elif kind in ("bj", "21", "21点"):
+                return err("BAD_PARAM", "21 点只能和 Agent 庄家对局，用 /game start bj")
+            else:
+                kind = "ttt"
             if not target:
                 return err("BAD_PARAM", "用法：/game invite 用户名")
             if chat_history.get_user(target) is None:
                 return err("NOT_FOUND", f"用户 {target} 不存在")
             if not self.users.is_online(target):
                 return err("USER_OFFLINE", f"{target} 不在线，等他上线再邀请")
-            ok, detail = self.games.invite(ctx.user_id, target)
+            ok, detail = self.games.invite(ctx.user_id, target, kind)
             if not ok:
                 return err("BAD_GAME", detail)
             self.users.send_to(target, {
                 "type": "game", "action": "invite", "game_id": "",
-                "from": ctx.user_id, "ttl": game_service.INVITE_TTL_SECONDS,
+                "from": ctx.user_id, "kind": kind,
+                "ttl": game_service.INVITE_TTL_SECONDS,
             })
-            return {"type": "system", "msg": f"[井字棋] {detail}，对方发 /game accept 即可开局"}
+            return {"type": "system", "msg": f"[{game_service.game_name(kind)}] {detail}，对方发 /game accept 即可开局"}
 
         if action in ("accept", "decline"):
             pending = self.games.pending_invite(ctx.user_id)
@@ -621,14 +648,30 @@ class ChatService:
             if action == "decline":
                 self.games.decline(ctx.user_id)
                 self.users.send_to(inviter, {
-                    "type": "system", "msg": f"[井字棋] {ctx.user_id} 拒绝了你的邀请"})
+                    "type": "system", "msg": f"[{game_service.game_name(kind)}] {ctx.user_id} 拒绝了你的邀请"})
                 return {"type": "system", "msg": "已拒绝邀请"}
             ok, detail, game = self.games.accept(ctx.user_id)
             if not ok or game is None:
                 return err("BAD_GAME", detail)
             self._push_game(game, note=f"{inviter}（X）vs {ctx.user_id}（O）开局")
-            self.users.send_to(inviter, {"type": "system", "msg": f"[井字棋] {detail}"})
+            self.users.send_to(inviter, {"type": "system", "msg": f"[{game_service.game_name(game.kind)}] {detail}"})
             return {"type": "system", "msg": detail}
+
+        # ---------------- 21 点：要牌 / 停牌 ----------------
+        if action in ("hit", "stand"):
+            game = self.games.current(ctx.user_id)
+            if game is None or getattr(game, "kind", "ttt") != "bj":
+                return err("NO_GAME", "你当前没有 21 点对局，先 /game start bj")
+            if action == "hit":
+                ok, detail = game.hit(ctx.user_id)
+            else:
+                ok, detail = game.stand(ctx.user_id)
+            if not ok:
+                return err("BAD_STATE", detail)
+            self._push_game(game, announce=False)
+            if game.over:
+                self._finish_game(game, kind="bj")
+            return None
 
         # ---------------- 落子 ----------------
         if action == "move":
@@ -646,7 +689,7 @@ class ChatService:
             self._push_game(game, note=f"{ctx.user_id} 下在 {cell}")
             if game.over:
                 self._finish_game(game)
-            elif game.vs_agent and game.turn == "O":
+            elif getattr(game, "kind", "ttt") != "bj" and game.vs_agent and game.turn == "O":
                 self._agent_pool.submit(self._game_agent_task, ctx.user_id, game)
             return None
 
@@ -696,7 +739,7 @@ class ChatService:
             if not ready:
                 self._push_game(game, announce=False)
                 self.users.broadcast({"type": "system", "msg": (
-                    f"[井字棋] {ctx.user_id} 想再来一局 · {detail}")})
+                    f"[{game_service.game_name(getattr(game, 'kind', 'ttt'))}] {ctx.user_id} 想再来一局 · {detail}")})
                 return None
 
             # 双方都确认：关掉旧局，换先手开新局
@@ -726,14 +769,14 @@ class ChatService:
                 # 人对 Agent：只关掉自己这一局
                 self._close_game(game)
                 self.users.broadcast({"type": "system", "msg": (
-                    f"[井字棋] {ctx.user_id} 退出了对局。{self.games.score_text(ctx.user_id)}")})
+                    f"[{game_service.game_name(getattr(game, 'kind', 'ttt'))}] {ctx.user_id} 退出了对局。{self.games.score_text(ctx.user_id, getattr(game, 'kind', 'ttt'))}")})
             return None
 
         return err("BAD_GAME",
                    "用法：/game start | invite 用户名 | accept | decline | "
                    "move 5 | watch | board | status | quit")
 
-    def _finish_game(self, game) -> None:
+    def _finish_game(self, game, kind: str = "ttt") -> None:
         """收尾：记战绩、广播最终棋盘。
 
         这里故意不发 closed：客户端要留着棋盘给双方看结果，等他们开新局或点"关闭"再清。
@@ -749,7 +792,8 @@ class ChatService:
         self.users.broadcast({"type": "game", "action": "closed", "game_id": game.id})
         self.games.close(game)
         self.users.broadcast({"type": "system", "msg": (
-            f"[井字棋] {user_id} {reason}，本局已结束。{self.games.score_text(user_id)}")})
+            f"[{game_service.game_name(getattr(game, 'kind', 'ttt'))}] {user_id} {reason}，本局已结束。"
+            f"{self.games.score_text(user_id, getattr(game, 'kind', 'ttt'))}")})
 
     def _close_game(self, game) -> None:
         self.users.broadcast({"type": "game", "action": "closed", "game_id": game.id})
@@ -766,7 +810,7 @@ class ChatService:
         if game.vs_agent:
             self._close_game(game)
             self.users.broadcast({"type": "system", "msg": (
-                f"[井字棋] {user_id} 掉线，对局已取消")})
+                f"[{game_service.game_name(getattr(game, 'kind', 'ttt'))}] {user_id} 掉线，对局已取消")})
             return
         if game.forfeit(user_id):
             self.games.record(game)
@@ -777,10 +821,11 @@ class ChatService:
 
     def _game_agent_task(self, user_id: str, game) -> None:
         """Agent 的一轮：读棋盘、用 game_move 落子、点评一句。"""
+        label = game_service.game_name(getattr(game, "kind", "ttt"))
         prompt = (
-            f"你在和用户 {user_id} 玩井字棋。你执 O，对方执 X，对方先手。\n"
+            f"你在和用户 {user_id} 玩{label}。你执 O，对方执 X，对方先手。\n"
             f"当前棋盘（数字是空位）：\n{game.render()}\n"
-            f"可落子位置：{game.legal_moves()}。\n"
+            f"可落子位置：{game.legal_moves()[:60]}（共 {len(game.legal_moves())} 个）。\n"
             "规则：必须调用 game_move(cell) 落子，cell 只能从可落子位置里取；"
             "落子后用一句话点评这步棋，不要输出完整棋谱，也不要替玩家落子。"
         )
@@ -807,7 +852,8 @@ class ChatService:
         text = _clamp_reply((reply or "").strip())
         if game.over:
             text += f"\n结果：{self._game_result_text(game)}"
-        text = f"{text}\n\n{game.render()}"
+        if getattr(game, "kind", "ttt") != "gomoku":
+            text = f"{text}\n\n{game.render()}"
 
         # 先推状态，再广播 Agent 的点评
         self._push_game(game, announce=False)

@@ -1147,9 +1147,319 @@ textarea {
   display: none;
 }
 
+/* ---------------- 五子棋：交叉线棋盘 ---------------- */
+.gomoku {
+  --n: 15;
+  --cell: clamp(22px, 4.2vh, 42px);
+  position: relative;
+  width: calc(var(--cell) * var(--n));
+  height: calc(var(--cell) * var(--n));
+  background: linear-gradient(160deg, #f7f3e6, #efe9d8);
+  border: 1px solid var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.go-grid {
+  position: absolute;
+  left: calc(var(--cell) * 0.5);
+  top: calc(var(--cell) * 0.5);
+  width: calc(var(--cell) * (var(--n) - 1));
+  height: calc(var(--cell) * (var(--n) - 1));
+  background-image:
+    linear-gradient(to right, #8d8778 1px, transparent 1px),
+    linear-gradient(to bottom, #8d8778 1px, transparent 1px);
+  background-size: var(--cell) var(--cell);
+  border-right: 1px solid #8d8778;
+  border-bottom: 1px solid #8d8778;
+  opacity: 0.55;
+}
+
+.go-star {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: #6f6a5d;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+
+.go-point {
+  position: absolute;
+  width: var(--cell);
+  height: var(--cell);
+  transform: translate(-50%, -50%);
+  border: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+}
+
+.go-point:hover:not(:disabled) {
+  background: rgba(205, 242, 63, 0.35);
+}
+
+.go-point:disabled {
+  cursor: default;
+}
+
+.go-stone {
+  width: calc(var(--cell) * 0.86);
+  height: calc(var(--cell) * 0.86);
+  border-radius: 50%;
+  animation: stone-drop 0.24s cubic-bezier(0.2, 0.9, 0.25, 1.2) both;
+}
+
+.go-stone.black {
+  background: radial-gradient(circle at 34% 28%, #585349, #14130f 62%, #000);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35), inset 0 1px 2px rgba(255, 255, 255, 0.22);
+}
+
+.go-stone.white {
+  background: radial-gradient(circle at 34% 28%, #fff, #efece2 58%, #cfc9ba);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.22), inset 0 1px 2px #fff;
+}
+
+.go-stone.last::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 1px solid var(--ink);
+}
+
+.go-stone.win {
+  box-shadow: 0 0 0 3px var(--accent), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes stone-drop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ---------------- 21 点牌桌 ---------------- */
+.bj {
+  display: grid;
+  gap: 12px;
+  width: min(760px, 94%);
+  padding: 16px 18px;
+  border: 1px solid var(--ink);
+  background: radial-gradient(120% 90% at 50% 0%, #fdfcf6, #f6f4ec 60%, #efece0);
+  box-shadow: var(--shadow);
+}
+
+.bj-seat {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--rule-strong);
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.bj-who span {
+  display: block;
+  font: 400 9px/1.5 var(--mono);
+  letter-spacing: 0.18em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+
+.bj-who b {
+  font-size: 14px;
+}
+
+.bj-who em {
+  margin-left: 5px;
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.bj-cards {
+  display: flex;
+  gap: 9px;
+  justify-content: center;
+  align-items: center;
+  min-height: 108px;
+}
+
+.bj-card {
+  position: relative;
+  width: 72px;
+  height: 102px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  box-shadow: 2px 2px 0 rgba(16, 15, 13, 0.1);
+  animation: bj-deal 0.36s cubic-bezier(0.2, 0.8, 0.25, 1) both;
+  color: var(--ink);
+  font-family: var(--mono);
+}
+
+.bj-card.red {
+  color: var(--red);
+}
+
+.bj-card.back {
+  background: repeating-linear-gradient(45deg, #100f0d 0 4px, #1d1c18 4px 8px);
+}
+
+.bj-card.back::after {
+  content: "T";
+  position: absolute;
+  inset: 14% 16%;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  color: var(--lime-deep);
+  font: 700 16px/1 var(--mono);
+}
+
+.bj-corner {
+  position: absolute;
+  top: 5px;
+  left: 6px;
+  font-size: 12px;
+  line-height: 1.05;
+  font-weight: 700;
+  text-align: center;
+}
+
+.bj-pip {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.bj-pip small {
+  font-size: 13px;
+}
+
+.bj-total {
+  min-width: 58px;
+  padding: 6px 10px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  text-align: center;
+  font: 700 15px/1.2 var(--mono);
+}
+
+.bj-pot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px dashed var(--rule-strong);
+  border-bottom: 1px dashed var(--rule-strong);
+  color: var(--muted);
+  font: 400 10.5px/1.5 var(--mono);
+}
+
+.bj-chips {
+  display: flex;
+  gap: 3px;
+}
+
+.bj-chips i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--ink);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--surface);
+}
+
+.bj-chips i.dark {
+  background: var(--ink);
+  box-shadow: inset 0 0 0 3px var(--accent);
+}
+
+.bj-result {
+  margin: 0;
+  padding: 6px 0;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.bj-result.lose {
+  color: var(--red);
+}
+
+.bj-result.win {
+  color: var(--ok);
+}
+
+.bj-result .dim {
+  margin-left: 8px;
+  font: 400 10.5px/1.5 var(--mono);
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.bj-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.bj-actions .btn {
+  padding: 5px 16px;
+}
+
+.arena-starts {
+  display: flex;
+  gap: 8px;
+}
+
+@keyframes bj-deal {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) rotateY(90deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotateY(0);
+  }
+}
+
+.game-board-lg {
+  width: min(60vh, 540px);
+}
+
 /* 剧场模式棋盘再大一号 */
 .app[data-layout="theater"] .game-board-lg {
   width: min(66vh, 640px);
+}
+
+.app[data-layout="theater"] .gomoku {
+  --cell: clamp(24px, 5.4vh, 52px);
 }
 
 .app[data-layout="game"] .chead {
@@ -1299,8 +1609,23 @@ textarea {
 }
 
 .arena-status .rematch {
-  flex: 1 1 100%;
+  flex: 0 1 auto;
   margin-top: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--ink);
+}
+
+.arena-status .rematch-state {
+  font-size: 10.5px;
+}
+
+.arena-status .rematch-actions .btn {
+  flex: 0 0 auto;
+  padding: 4px 14px;
+}
+
+.arena-status .rematch-bar {
+  max-width: 200px;
 }
 
 /* 大厅里的大棋盘 */

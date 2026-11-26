@@ -24,6 +24,9 @@ export interface Chat {
   gameDecline: () => void;
   gameFocus: (id: string) => void;
   gameRematch: () => void;
+  gameHit: () => void;
+  gameStand: () => void;
+  gameStartKind: (kind: 'ttt' | 'gomoku' | 'bj') => void;
   setLayout: (mode: 'chat' | 'game' | 'theater') => void;
   setIncludePrivate: (value: boolean) => void;
   setHelp: (open: boolean) => void;
@@ -332,6 +335,24 @@ export function useChat(): Chat {
     [],
   );
 
+  const gameHit = useCallback(() => {
+    send({ type: 'game', text: 'hit' });
+  }, [send]);
+
+  const gameStand = useCallback(() => {
+    send({ type: 'game', text: 'stand' });
+  }, [send]);
+
+  const gameStartKind = useCallback(
+    (kind: 'ttt' | 'gomoku' | 'bj') => {
+      const arg = kind === 'ttt' ? '' : ` ${kind}`;
+      if (!send({ type: 'game', text: `start${arg}` })) {
+        dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，开局指令没有发出去' });
+      }
+    },
+    [send],
+  );
+
   const gameRematch = useCallback(() => {
     if (!send({ type: 'game', text: 'rematch' })) {
       dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，再来一局的请求没有发出去' });
@@ -455,6 +476,9 @@ export function useChat(): Chat {
     gameDecline,
     gameFocus,
     gameRematch,
+    gameHit,
+    gameStand,
+    gameStartKind,
     setLayout,
     setIncludePrivate,
     setHelp,

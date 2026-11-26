@@ -1,5 +1,5 @@
 import type { GameInvite, GameState } from '../types';
-import { GameBoard, isPlayerOf, myTurnOf, resultText, statusText } from './GameBoard';
+import { GameStage, isPlayerOf, myTurnOf, statusText } from './GameBoard';
 import { RematchBar } from './RematchBar';
 
 interface Props {
@@ -96,13 +96,11 @@ export function GamePanel({
         {!isPlayerOf(game, me) && <span className="game-spectate">只读</span>}
       </p>
 
-      <GameBoard game={game} me={me} onMove={onMove} />
+      <GameStage game={game} me={me} onMove={onMove} />
 
       {game.over && isPlayerOf(game, me) && (
         <RematchBar game={game} me={me} onRematch={onRematch} onQuit={onQuit} />
       )}
-
-      {game.over && !game.vs_agent && <p className="game-score">{resultText(game)}</p>}
 
       {ongoing.length > 1 && (
         <div className="game-list">

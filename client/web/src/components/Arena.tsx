@@ -1,5 +1,5 @@
 import type { GameInvite, GameState } from '../types';
-import { GameBoard, isPlayerOf, myTurnOf, statusText } from './GameBoard';
+import { GameStage, isPlayerOf, myTurnOf, statusText } from './GameBoard';
 import { RematchBar } from './RematchBar';
 
 /** 大厅：专注游戏模式中间那块大棋盘 + 顶部对局信息 + 底部状态条 */
@@ -10,7 +10,9 @@ export function Arena({
   onMove,
   onRematch,
   onQuit,
-  onStart,
+  onHit,
+  onStand,
+  onStartKind,
   onAccept,
   onDecline,
   onClose,
@@ -22,13 +24,23 @@ export function Arena({
   onMove: (cell: number) => void;
   onRematch: () => void;
   onQuit: () => void;
-  onStart: () => void;
+  onHit: () => void;
+  onStand: () => void;
+  onStartKind: (kind: 'ttt' | 'gomoku' | 'bj') => void;
   onAccept: () => void;
   onDecline: () => void;
   onClose: () => void;
   onTheater: () => void;
 }) {
   const players = game?.players ?? { X: '-', O: '-' };
+  const kind = game?.kind ?? 'ttt';
+  const title = kind === 'gomoku' ? '五子棋' : kind === 'bj' ? '21 点' : '井字棋';
+  const subtitle =
+    kind === 'gomoku'
+      ? '15 × 15 · 五连获胜'
+      : kind === 'bj'
+        ? '庄家 Agent · 你的手牌只有你能看到'
+        : '3 × 3 · 三连获胜';
   const isPlayer = game ? isPlayerOf(game, me) : false;
   const myTurn = game ? myTurnOf(game, me) : false;
   const waits = game && !game.over && game.turn ? players[game.turn] : '';
@@ -37,9 +49,9 @@ export function Arena({
     <main className="arena">
       <div className="arena-top">
         <div>
-          <div className="gname">井字棋</div>
+          <div className="gname">{title}</div>
           <div className="gsub">
-            3 × 3 · 三连获胜
+            {subtitle}
             {game ? ` · ${game.spectators} 人观战` : ''}
           </div>
         </div>
@@ -68,7 +80,7 @@ export function Arena({
 
       <div className="arena-stage">
         {game ? (
-          <GameBoard game={game} me={me} size="large" onMove={onMove} />
+          <GameStage game={game} me={me} size="large" onMove={onMove} />
         ) : (
           <div className="arena-empty">
             {invite ? (
@@ -88,10 +100,18 @@ export function Arena({
             ) : (
               <>
                 <p>当前没有对局</p>
-                <button type="button" className="btn primary" onClick={onStart}>
-                  和 Agent 开局
-                </button>
-                <p className="dim">或发 /game invite 用户名 找人对弈</p>
+                <div className="arena-starts">
+                  <button type="button" className="btn primary" onClick={() => onStartKind('ttt')}>
+                    井字棋
+                  </button>
+                  <button type="button" className="btn primary" onClick={() => onStartKind('gomoku')}>
+                    五子棋
+                  </button>
+                  <button type="button" className="btn primary" onClick={() => onStartKind('bj')}>
+                    21 点
+                  </button>
+                </div>
+                <p className="dim">或发 /game invite 用户名 [gomoku] 找人对弈</p>
               </>
             )}
           </div>
@@ -106,8 +126,18 @@ export function Arena({
           {game.over && isPlayer && (
             <RematchBar game={game} me={me} onRematch={onRematch} onQuit={onQuit} />
           )}
-          {!game.over && !isPlayer && <span className="dim">观战 · 不能落子</span>}
-          {!game.over && isPlayer && waits === me && <span className="dim">点格子落子</span>}
+          {game.kind === 'bj' && !game.over && isPlayer && (
+            <span className="bj-actions">
+              <button type="button" className="btn primary" onClick={onHit}>
+                要牌
+              </button>
+              <button type="button" className="btn" onClick={onStand}>
+                停牌
+              </button>
+            </span>
+          )}
+          {game.kind !== 'bj' && !game.over && !isPlayer && <span className="dim">观战 · 不能落子</span>}
+          {game.kind !== 'bj' && !game.over && isPlayer && waits === me && <span className="dim">点格子落子</span>}
         </div>
       )}
     </main>

@@ -426,10 +426,19 @@ function onServer(state: State, msg: ServerMsg): State {
           : state.gameFocus;
         return { ...state, games, gameFocus: focus };
       }
+      const kind = msg.kind ?? 'ttt';
       const board = msg.board ?? [];
-      if (board.length !== 9 || !msg.game_id || !msg.players) return state;
+      if (!msg.game_id || !msg.players) return state;
+      if (kind !== 'bj' && !board.length) return state;
+      if (kind === 'bj' && !msg.bj) return state;
       const game: GameState = {
+        kind,
         id: msg.game_id,
+        size: msg.size,
+        win_len: msg.win_len,
+        win_cells: msg.win_cells ?? [],
+        last_move: msg.last_move ?? null,
+        bj: msg.bj,
         players: msg.players,
         vs_agent: Boolean(msg.vs_agent),
         board,

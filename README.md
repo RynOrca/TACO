@@ -38,7 +38,9 @@
 | Agent | 真实工具调用 | 读历史、检索、存总结/待办、读服务器时间、联网搜索；每次调用的名字/参数/耗时/结果预览随回复回传，界面按「真实工具调用 N 次」展开 |
 | Agent | 定时任务 | `summary`（定时总结）/ `reminder`（定时提醒），任务落 SQLite、可增删启停、重启恢复；`/auto` 保留兼容 |
 | Agent | 井字棋（人对 Agent） | 服务端棋盘 + 侧栏可点击棋盘；Agent 通过 `game_move` 工具落子，非法着法被拒绝；模型不可用时本地 minimax 代打 |
-| 扩展 | 井字棋（人对人 + 观战） | `/game invite 用户名` 邀请另一位成员，接受后双方按轮次落子；其他人在右栏直接观战（只读棋盘、显示 `A vs B · N 人观战`）；一方掉线或认输判负 |
+| 扩展 | 棋牌室（井字棋 / 五子棋 / 21 点） | `/game start [ttt\|gomoku\|bj]` 对 Agent，`/game invite 用户名 [gomoku]` 对人；15×15 五子棋与 21 点共用同一套邀请 / 观战 / 断线判负 / 再来一局 |
+| 扩展 | 21 点的隐藏信息 | 服务端按连接裁剪视图：玩家只看到自己的牌与庄家明牌，Agent 只看到自己的牌与玩家张数，观战者只有明牌；暗牌从不下发 |
+| 扩展 | 专注游戏 / 剧场布局 | 进对局自动切专注（左栏折叠、聊天压窄、中间大棋盘），`全屏` 进剧场（聊天变浮层），`Esc` 回聊天且对局不中断 |
 | 扩展 | 记录持久化与检索 | SQLite + 分页 + 关键词检索，Agent 的 `search_chat_history` 走同一套 DAO |
 | 扩展 | 表情与图片 | Unicode 表情（纯表情放大）；图片压到最大边 1280，走 HTTP 上传，消息里只传文件名，支持 Ctrl+V 粘贴截图 |
 | 扩展 | 工具调用记录 | `steps` 字段回传 name/args/ok/ms/preview，答辩可直接展开 |
@@ -228,7 +230,7 @@ python -m server.main
 | `todos` | C→S | — | `ChatService.handle_todos` |
 | `autosummary` | C→S | `action`(`status`/`on`/`off`/`now`), `minutes` | `ChatService.handle_auto_summary`（`/auto` 快捷方式，内部映射到 summary 任务） |
 | `task` | C→S | `text`（`list` / `add summary every:10` / `add reminder in:5 开会` / `del|on|off 编号`） | `ChatService.handle_task` |
-| `game` | C→S | `text`（`start` / `invite 用户名` / `accept` / `decline` / `move 5` / `watch` / `board` / `status` / `quit`） | `ChatService.handle_game` |
+| `game` | C→S | `text`（`start [ttt\|gomoku\|bj]` / `invite 用户名 [gomoku]` / `accept` / `decline` / `move N` / `hit` / `stand` / `watch` / `board` / `status` / `quit`） | `ChatService.handle_game` |
 | `history` | C→S | 可选 `target`、`agent`、`limit`、`before_id` | `ChatService.handle_history`；客户端不能指定 room_id |
 | `ping` | C→S | `seq`, `ts`（桥/CLI）或 `t`（Web 前端） | 回 `pong`，原样带回 `seq` / `t` |
 | `read` | C→S | `id`（我看到的最后一条）, 可选 `target`/`agent` | `handle_read` 推进已读水位 |

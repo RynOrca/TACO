@@ -33,6 +33,7 @@ interface Props {
   onGameFocus: (id: string) => void;
   onGameRematch: () => void;
   onEnterArena: () => void;
+  onStartKind: (kind: 'ttt' | 'gomoku' | 'bj') => void;
 }
 
 export function SidePanel({
@@ -50,6 +51,7 @@ export function SidePanel({
   onGameFocus,
   onGameRematch,
   onEnterArena,
+  onStartKind,
 }: Props) {
   const [tab, setTab] = useState<Tab>('room');
 
@@ -230,6 +232,14 @@ export function SidePanel({
                 进入牌桌
               </button>
             )}
+            <section>
+              <h2>和 Agent 开局</h2>
+              <div className="auto-btns">
+                <button type="button" onClick={() => onStartKind('ttt')}>井字棋</button>
+                <button type="button" onClick={() => onStartKind('gomoku')}>五子棋</button>
+                <button type="button" onClick={() => onStartKind('bj')}>21 点</button>
+              </div>
+            </section>
             <section>
               <h2>邀请对弈</h2>
               {others.length === 0 && <p className="panel-empty">当前没有其他在线成员</p>}

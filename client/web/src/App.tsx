@@ -96,8 +96,11 @@ export default function App() {
           invite={state.gameInvite}
           onMove={chat.gameMove}
           onRematch={chat.gameRematch}
+          onHit={chat.gameHit}
+          onStand={chat.gameStand}
+          onStartKind={chat.gameStartKind}
           onQuit={chat.gameQuit}
-          onStart={chat.gameStart}
+
           onAccept={chat.gameAccept}
           onDecline={chat.gameDecline}
           onClose={() => chat.setLayout('chat')}
@@ -120,6 +123,7 @@ export default function App() {
         onGameFocus={chat.gameFocus}
         onGameRematch={chat.gameRematch}
         onEnterArena={() => chat.setLayout('game')}
+        onStartKind={chat.gameStartKind}
       />
 
       {state.auth.open && (

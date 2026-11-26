@@ -69,6 +69,12 @@ export interface ServerMsg {
   spectators?: number;
   scores?: Record<string, { win: number; lose: number; draw: number }>;
   rematch?: { votes: string[]; deadline: number; window: number };
+  kind?: 'ttt' | 'gomoku' | 'bj';
+  size?: number;
+  win_len?: number;
+  win_cells?: number[];
+  last_move?: number | null;
+  bj?: BjView;
   from?: string;
   ttl?: number;
 }
@@ -90,13 +96,41 @@ export interface TodoItem {
 }
 
 /** 井字棋面板状态（只发给下棋的本人） */
+export interface BjCard {
+  rank: string;
+  suit: string;
+}
+
+export interface BjView {
+  /** 自己的手牌；观战者/对手这里是空数组 */
+  player: BjCard[];
+  player_count: number;
+  player_score: number | null;
+  /** 庄家：未揭示时第二张是 null */
+  dealer: (BjCard | null)[];
+  dealer_score: number;
+  revealed: boolean;
+  bet: number;
+  deck_left: number;
+  round: number;
+}
+
 export interface GameState {
+  /** ttt / gomoku / bj */
+  kind: 'ttt' | 'gomoku' | 'bj';
   /** 对局 id：一人一局，观战靠它区分 */
   id: string;
   players: { X: string; O: string };
   /** 对手是不是 Agent（决定了提示文案和是否需要等模型） */
   vs_agent: boolean;
-  board: string[];               // 9 格：" " / "X" / "O"
+  /** 棋盘（井字棋 9 格 / 五子棋 225 格）；21 点没有棋盘 */
+  board: string[];
+  size?: number;
+  win_len?: number;
+  win_cells?: number[];
+  last_move?: number | null;
+  /** 21 点专用视图（按人裁剪） */
+  bj?: BjView;
   turn: 'X' | 'O';
   over: boolean;
   result: '' | 'win' | 'lose' | 'draw';
