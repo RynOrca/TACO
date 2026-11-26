@@ -513,12 +513,15 @@ class GameService:
 
     def rematch(self, game):
         """同一对玩家开新局：棋盘类交换先手，21 点换一副新牌。"""
-        if getattr(game, "kind", "ttt") == "bj":
+        kind = getattr(game, "kind", "ttt")
+        if kind == "bj":
             from server.services.blackjack import BlackjackGame
             seats = [s.user for s in getattr(game, "seats", [])] or [game.x_user]
             return self._register(BlackjackGame(seats[0], game.room_id, seats=seats))
-        new_game = Game(game.o_user, game.x_user, game.room_id, kind=game.kind)
-        return self._register(new_game)
+        if game.vs_agent:
+            # 人机对局没有第二个真人，换先手会把 x_user 变成 None
+            return self._register(Game(game.x_user, None, game.room_id, kind=kind))
+        return self._register(Game(game.o_user, game.x_user, game.room_id, kind=kind))
 
     def release(self, game) -> None:
         """结算后释放玩家名额：他们可以马上开新局，但棋局快照还留着给双方看结果。"""

@@ -727,7 +727,7 @@ python -m client.bridge
 | `TAVILY_API_KEY` | 空 | 联网搜索工具用；留空只影响该工具 |
 | `AGENT_MAX_STEPS` | `5` | ReAct 最大步数 |
 | `AGENT_GAME_FAST` | `1` | 游戏落子速度：`0` 普通请求（约 3s/步）、`1` 快路径（关思考 + 320 token + 12s 超时，约 1.5s/步）、`2` 纯本地不调模型（瞬间，回答注明未调用模型） |
-| `AGENT_TIMEOUT` | `60` | 目前只用于失败提示文案，未真正中断请求 |
+| `AGENT_TIMEOUT` | `60` | 单次 Agent 任务的整轮上限（秒）：多步 ReAct 到点会带着已有结果返回并标注 `[已超时]`；单步请求另有 30s 超时 |
 | `AGENT_AUTO_SUMMARY_SECONDS` | `0` | 启动时自动创建的 summary 任务周期（秒），0 关闭 |
 | `AGENT_AUTO_SUMMARY_MIN_MESSAGES` | `3` | 定时总结的"新消息条数"门槛 |
 | `MAX_HISTORY` | `20` | 定义了但当前未被读取 |
@@ -739,7 +739,7 @@ python -m client.bridge
 
 ## 已知限制
 
-- `AGENT_TIMEOUT` 只出现在失败提示文案里，模型调用实际是硬编码 `timeout=30`；`MAX_HISTORY` 未被读取。
+- Agent 的整轮上限靠每步前检查 `deadline` 实现，不是硬中断：模型单次请求仍在跑的那 30 秒无法撤回；`MAX_HISTORY` 仍未读取。
 - 历史按 20 条一页向前翻，只有滚到顶部才会请求下一页；每条只显示本地时区的 `HH:MM`。
 - 前端消息流是普通 DOM 列表（没有虚拟滚动）：几百条以内很稳，单会话上千条时首屏渲染会变慢。
 - 聊天室固定一个 `main` 群，没有建群 / 拉人 / 退群；私聊按 `pm:a:b` 自动建房间。

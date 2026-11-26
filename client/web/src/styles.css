@@ -2608,6 +2608,62 @@ textarea {
 }
 
 /* 标题里的 "A vs B · N 人观战" */
+.game-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+}
+
+.game-card.over {
+  background: var(--surface-2);
+}
+
+.game-card-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.game-card-top b {
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
+}
+
+.game-card-top em {
+  font-style: normal;
+  color: var(--faint);
+  font: 400 10px/1.5 var(--mono);
+}
+
+.game-card-state {
+  margin: 0;
+  color: var(--muted);
+  font: 400 11px/1.6 var(--mono);
+}
+
+.game-card-state.done {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.game-card-enter {
+  justify-self: start;
+  padding: 5px 16px;
+  font-size: 11px;
+}
+
+/* 侧栏分区之间留白放松一点 */
+.panel-body section + section {
+  margin-top: 16px;
+}
+
+.panel-body h2 .tag.soft {
+  margin-left: 6px;
+}
+
 .game-title {
   display: flex;
   flex-direction: column;
