@@ -94,9 +94,11 @@ button{font:inherit;color:inherit}
 .msg .tm{font:400 9.5px/1.4 var(--mono);color:var(--faint)}
 .msg p{margin:2px 0 0;font-size:13px;color:var(--text)}
 .msg.mine .bubble{display:inline-block;padding:5px 9px;border:1px solid var(--ink);background:var(--lime-soft)}
-.note{display:flex;align-items:center;gap:8px;padding:8px 0;color:var(--muted);font-size:11.5px}
-.note::before{content:"";flex:1;height:1px;background:var(--rule)}
-.note span{padding:1px 5px;border:1px solid var(--rule2);background:var(--surface2);font:400 9px/1.5 var(--mono);letter-spacing:.14em;color:var(--faint)}
+/* 系统提示：左对齐，左侧细竖线 + 窄标签栏 */
+.note{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:10px;
+  align-items:baseline;padding:6px 0 6px 10px;border-left:2px solid var(--rule2);color:var(--muted)}
+.note span{font:400 8.5px/1.9 var(--mono);letter-spacing:.16em;color:var(--faint);text-transform:uppercase}
+.note p{margin:0;font:400 11.5px/1.75 var(--mono);white-space:pre-wrap}
 .composer{padding:11px 18px 14px;border-top:1px solid var(--ink)}
 .box{border:1px solid var(--ink);padding:8px 10px;background:var(--surface)}
 .box .inp{color:var(--faint);font-size:13px;min-height:20px}
@@ -337,7 +339,7 @@ button{font:inherit;color:inherit}
       <div class="msg"><span class="ava">B</span><div><div><span class="who">bob</span><span class="tm">21:01</span></div><p>五子棋来一局？我执白</p></div></div>
       <div class="msg mine"><span class="ava self">A</span><div><div><span class="who">alice</span><span class="tm">21:02</span></div>
         <p class="bubble">行，我先手。@bob 别用 AI 偷看啊</p></div></div>
-      <div class="note"><span>系统</span>alice 邀请 bob 对弈五子棋</div>
+      <div class="note"><span>SYS</span><p>alice 邀请 bob 对弈五子棋</p></div>
       <div class="msg"><span class="ava">B</span><div><div><span class="who">bob</span><span class="tm">21:03</span></div><p>接受，观战的别报棋</p></div></div>
       <div class="msg"><span class="ava ai">AI</span><div><div><span class="who">Agent</span><span class="tm">21:04</span></div>
         <p>我看不到你们的手牌和落子计划，只能读到群聊里公开说的话。</p></div></div>

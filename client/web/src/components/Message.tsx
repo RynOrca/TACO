@@ -242,9 +242,12 @@ export function Note({
   tone: 'system' | 'error';
   items: { key: string; code?: string; text: string }[];
 }) {
+  // 左对齐的窄栏 + 左侧标签：每条系统提示单独一行，多行内容（/game 帮助）保持原有缩进
   return (
     <div className={`note ${tone}`}>
-      <span className="note-k">{tone === 'error' ? 'ERROR' : 'SYSTEM'}</span>
+      <span className="note-k" aria-hidden="true">
+        {tone === 'error' ? 'ERR' : 'SYS'}
+      </span>
       <div className="note-lines">
         {items.map((item) => (
           <p key={item.key}>

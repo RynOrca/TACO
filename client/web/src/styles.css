@@ -877,68 +877,50 @@ textarea {
   }
 }
 
-/* 系统提示 / 错误 */
+/* 系统提示 / 错误：左对齐，左侧一条细竖线当"批注边" */
 .note {
   flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: baseline;
+  padding: 6px 0 6px 10px;
+  border-left: 2px solid var(--rule-strong);
   color: var(--muted);
 }
 
-.note::before,
-.note::after {
-  content: "";
-  flex: 1 1 0;
-  height: 1px;
-  background: var(--rule);
-}
-
 .note-k {
-  flex: none;
-  padding: 1px 5px;
-  border: 1px solid var(--rule-strong);
-  background: var(--surface-2);
-  color: var(--faint);
-  font: 400 9px/1.5 var(--mono);
+  font: 400 8.5px/1.9 var(--mono);
   letter-spacing: 0.16em;
+  color: var(--faint);
+  text-transform: uppercase;
 }
 
 .note-lines {
-  flex: 0 1 auto;
   min-width: 0;
-  max-width: 72%;
   display: grid;
-  gap: 2px;
-  text-align: center;
-  font-size: 11.5px;
-  line-height: 1.55;
+  gap: 1px;
+  text-align: left;
+  font: 400 11.5px/1.75 var(--mono);
 }
 
 .note-lines p {
   margin: 0;
   overflow-wrap: anywhere;
-  white-space: pre-wrap;   /* /task list 这类多行系统提示要保留换行 */
+  white-space: pre-wrap;   /* /game、/task 这类多行帮助要保留原有缩进 */
 }
 
 .note.error {
+  border-left-color: var(--warn);
   color: var(--warn);
 }
 
 .note.error .note-k {
-  border-color: var(--warn-line);
-  background: var(--warn-bg);
   color: var(--warn);
 }
 
 .note.error .note-lines {
-  padding: 4px 10px;
-  border: 1px solid var(--warn-line);
-  background: var(--warn-bg);
-  text-align: left;
   font-family: var(--mono);
-  font-size: 11px;
 }
 
 .note-lines code {
