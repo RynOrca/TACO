@@ -2,6 +2,7 @@ import { AGENT, MAIN, pmThread, threadUser } from './types';
 import type {
   ChatEvent,
   GameState,
+  GameInvite,
   HistoryItem,
   LinkState,
   ServerMsg,
@@ -44,8 +45,14 @@ export interface State {
   bottomToken: number;
   /** 每次 +1 表示该重新拉一次待办 */
   todosDirty: number;
-  /** 井字棋面板（服务端只把状态发给下棋本人） */
-  game: GameState | null;
+  /** 进行中的对局：key 是 game id。自己参与的、别人在下的都在里面 */
+  games: Record<string, GameState>;
+  /** 侧栏当前看的那盘（默认：自己那一盘，否则最近更新的一盘） */
+  gameFocus: string | null;
+  /** 收到的对局邀请 */
+  gameInvite: GameInvite | null;
+  /** 界面布局：聊天 / 专注游戏 / 剧场（全屏游戏 + 聊天浮层） */
+  layout: 'chat' | 'game' | 'theater';
 }
 
 export type Action =
@@ -61,6 +68,9 @@ export type Action =
   | { type: 'agent-request'; thread: string; scope: 'private' | 'group' }
   | { type: 'hello'; imageBase: string }
   | { type: 'include-private'; value: boolean }
+  | { type: 'game-focus'; id: string | null }
+  | { type: 'game-invite-clear' }
+  | { type: 'layout'; mode: 'chat' | 'game' | 'theater' }
   | { type: 'help'; open: boolean }
   | { type: 'latency'; ms: number | null }
   | { type: 'local'; kind: 'system' | 'error'; text: string };
@@ -399,18 +409,71 @@ function onServer(state: State, msg: ServerMsg): State {
         : state;
 
     case 'game': {
-      if (msg.action === 'closed') return { ...state, game: null };
+      // 邀请：只发给被邀请人，弹一张"接受/拒绝"的卡片
+      if (msg.action === 'invite') {
+        if (!msg.from) return state;
+        return {
+          ...state,
+          gameInvite: {
+            from: msg.from,
+            at: Date.now(),
+            ttl: msg.ttl ?? 120,
+            kind: msg.kind ?? 'ttt',
+          },
+        };
+      }
+      if (msg.action === 'closed') {
+        if (!msg.game_id) return state;
+        const games = { ...state.games };
+        delete games[msg.game_id];
+        const focus = state.gameFocus === msg.game_id
+          ? Object.keys(games)[0] ?? null
+          : state.gameFocus;
+        return { ...state, games, gameFocus: focus };
+      }
+      const kind = msg.kind ?? 'ttt';
       const board = msg.board ?? [];
-      if (board.length !== 9) return state;
+      if (!msg.game_id || !msg.players) return state;
+      if (kind !== 'bj' && !board.length) return state;
+      if (kind === 'bj' && !msg.bj) return state;
+      const game: GameState = {
+        kind,
+        id: msg.game_id,
+        size: msg.size,
+        win_len: msg.win_len,
+        win_cells: msg.win_cells ?? [],
+        last_move: msg.last_move ?? null,
+        bj: msg.bj,
+        players: msg.players,
+        vs_agent: Boolean(msg.vs_agent),
+        board,
+        turn: msg.turn === 'O' ? 'O' : 'X',
+        over: Boolean(msg.over),
+        result: (msg.result ?? '') as GameState['result'],
+        winner: (msg.winner ?? null) as GameState['winner'],
+        legal: msg.legal ?? [],
+        spectators: msg.spectators ?? 0,
+        scores: msg.scores ?? {},
+        rematch: msg.rematch ?? { votes: [], deadline: 0, window: 10 },
+      };
+      // 自己刚参与的这盘自动聚焦；已经聚焦的不动，避免观战时被别人的落子抢走
+      const mine = Boolean(state.me) &&
+        (game.players.X === state.me || game.players.O === state.me);
+      // 自己那盘永远优先；别人在下时才保持当前观战目标
+      const focus = mine
+        ? game.id
+        : state.gameFocus && state.games[state.gameFocus]
+          ? state.gameFocus
+          : game.id;
+      // 只有"这盘确实有我在里面"才清掉邀请；旁观别人的牌桌不该把邀请吞掉
+      const mineNow = kind === 'bj'
+        ? Boolean(state.me && game.bj?.seats.some((x) => x.user === state.me))
+        : Boolean(state.me && (game.players.X === state.me || game.players.O === state.me));
       return {
         ...state,
-        game: {
-          board,
-          turn: msg.turn === 'O' ? 'O' : 'X',
-          over: Boolean(msg.over),
-          result: (msg.result ?? '') as GameState['result'],
-          score: msg.score ?? { win: 0, lose: 0, draw: 0 },
-        },
+        games: { ...state.games, [game.id]: game },
+        gameFocus: focus,
+        gameInvite: mineNow ? null : state.gameInvite,
       };
     }
 
@@ -524,6 +587,15 @@ export function reducer(state: State, action: Action): State {
     case 'help':
       return { ...state, help: action.open };
 
+    case 'game-focus':
+      return { ...state, gameFocus: action.id, gameInvite: null };
+
+    case 'game-invite-clear':
+      return { ...state, gameInvite: null };
+
+    case 'layout':
+      return { ...state, layout: action.mode };
+
     case 'latency':
       return { ...state, latency: { ms: action.ms, at: Date.now() } };
 
@@ -561,7 +633,10 @@ export function initialState(): State {
     prependToken: 0,
     bottomToken: 0,
     todosDirty: 0,
-    game: null,
+    games: {},
+    gameFocus: null,
+    gameInvite: null,
+    layout: 'chat',
   };
 }
 

@@ -65,6 +65,106 @@ textarea {
   height: 100%;
   background: var(--surface);
   border-top: 3px solid var(--ink);
+  transition: grid-template-columns 0.34s cubic-bezier(0.22, 0.7, 0.2, 1);
+}
+
+/* 专注游戏：左栏收成图标条、聊天压到 320px，中间让给牌桌 */
+.app[data-layout="game"] {
+  grid-template-columns: 46px 320px minmax(0, 1fr);
+}
+
+/* 专注模式不显示右侧标签页：棋盘已经占满，赛况放在牌桌底部 */
+.app[data-layout="game"] .panel {
+  display: none;
+}
+
+/* 剧场：只留牌桌，聊天变成右下角浮层 */
+.app[data-layout="theater"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app[data-layout="theater"] .sidebar {
+  display: none;
+}
+
+.app[data-layout="theater"] .panel {
+  display: none;
+}
+
+.app[data-layout="theater"] .conv {
+  display: flex;
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  width: 320px;
+  height: 300px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  box-shadow: 5px 5px 0 rgba(16, 15, 13, 0.14);
+}
+
+.app[data-layout="theater"] .conv .chead {
+  padding: 8px 12px;
+}
+
+.app[data-layout="theater"] .conv .chead h1 {
+  font-size: 14px;
+}
+
+.app[data-layout="theater"] .conv .composer {
+  padding: 8px 12px 10px;
+}
+
+/* ---------- 左栏折叠 ---------- */
+.sidebar.collapsed {
+  align-items: center;
+  padding: 8px 0;
+  gap: 4px;
+}
+
+.sidebar.collapsed .brand {
+  padding: 2px 0 8px;
+  justify-content: center;
+  gap: 0;
+}
+
+.sidebar.collapsed .brand .name,
+.sidebar.collapsed .brand .sub,
+.sidebar.collapsed .conn,
+.sidebar.collapsed .sect,
+.sidebar.collapsed .me .who,
+.sidebar.collapsed .me .switch {
+  display: none;
+}
+
+.sidebar.collapsed .list {
+  padding: 4px 0;
+  justify-items: center;
+}
+
+.sidebar.collapsed .list-empty,
+.sidebar.collapsed .panel-empty {
+  display: none;
+}
+
+.sidebar.collapsed .item {
+  grid-template-columns: 26px;
+  justify-items: center;
+  padding: 5px;
+  gap: 0;
+}
+
+.sidebar.collapsed .item .t,
+.sidebar.collapsed .item .meta {
+  display: none;
+}
+
+.sidebar.collapsed .me {
+  margin-top: auto;
+  padding: 8px 0;
+  justify-content: center;
+  width: 100%;
 }
 
 /* ------------------------------------------------------------ 侧栏 */
@@ -877,68 +977,50 @@ textarea {
   }
 }
 
-/* 系统提示 / 错误 */
+/* 系统提示 / 错误：左对齐，左侧一条细竖线当"批注边" */
 .note {
   flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: baseline;
+  padding: 6px 0 6px 10px;
+  border-left: 2px solid var(--rule-strong);
   color: var(--muted);
 }
 
-.note::before,
-.note::after {
-  content: "";
-  flex: 1 1 0;
-  height: 1px;
-  background: var(--rule);
-}
-
 .note-k {
-  flex: none;
-  padding: 1px 5px;
-  border: 1px solid var(--rule-strong);
-  background: var(--surface-2);
-  color: var(--faint);
-  font: 400 9px/1.5 var(--mono);
+  font: 400 8.5px/1.9 var(--mono);
   letter-spacing: 0.16em;
+  color: var(--faint);
+  text-transform: uppercase;
 }
 
 .note-lines {
-  flex: 0 1 auto;
   min-width: 0;
-  max-width: 72%;
   display: grid;
-  gap: 2px;
-  text-align: center;
-  font-size: 11.5px;
-  line-height: 1.55;
+  gap: 1px;
+  text-align: left;
+  font: 400 11.5px/1.75 var(--mono);
 }
 
 .note-lines p {
   margin: 0;
   overflow-wrap: anywhere;
-  white-space: pre-wrap;   /* /task list 这类多行系统提示要保留换行 */
+  white-space: pre-wrap;   /* /game、/task 这类多行帮助要保留原有缩进 */
 }
 
 .note.error {
+  border-left-color: var(--warn);
   color: var(--warn);
 }
 
 .note.error .note-k {
-  border-color: var(--warn-line);
-  background: var(--warn-bg);
   color: var(--warn);
 }
 
 .note.error .note-lines {
-  padding: 4px 10px;
-  border: 1px solid var(--warn-line);
-  background: var(--warn-bg);
-  text-align: left;
   font-family: var(--mono);
-  font-size: 11px;
 }
 
 .note-lines code {
@@ -1056,15 +1138,698 @@ textarea {
   padding: 4px 16px;
 }
 
+/* ------------------------------------------------------------ 游戏大厅（专注模式） */
+.app[data-layout="game"] .chead .tools,
+.app[data-layout="game"] .box-hint,
+.app[data-layout="theater"] .chead .tools,
+.app[data-layout="theater"] .chead .meta,
+.app[data-layout="theater"] .box-hint {
+  display: none;
+}
+
+/* ---------------- 五子棋：交叉线棋盘 ---------------- */
+.gomoku {
+  --n: 15;
+  --cell: clamp(22px, 4.2vh, 42px);
+  position: relative;
+  width: calc(var(--cell) * var(--n));
+  height: calc(var(--cell) * var(--n));
+  background: linear-gradient(160deg, #f7f3e6, #efe9d8);
+  border: 1px solid var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.go-grid {
+  position: absolute;
+  left: calc(var(--cell) * 0.5);
+  top: calc(var(--cell) * 0.5);
+  width: calc(var(--cell) * (var(--n) - 1));
+  height: calc(var(--cell) * (var(--n) - 1));
+  background-image:
+    linear-gradient(to right, #8d8778 1px, transparent 1px),
+    linear-gradient(to bottom, #8d8778 1px, transparent 1px);
+  background-size: var(--cell) var(--cell);
+  border-right: 1px solid #8d8778;
+  border-bottom: 1px solid #8d8778;
+  opacity: 0.55;
+}
+
+.go-star {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: #6f6a5d;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+
+.go-point {
+  position: absolute;
+  width: var(--cell);
+  height: var(--cell);
+  transform: translate(-50%, -50%);
+  border: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+}
+
+.go-point:hover:not(:disabled) {
+  background: rgba(205, 242, 63, 0.35);
+}
+
+.go-point:disabled {
+  cursor: default;
+}
+
+.go-stone {
+  width: calc(var(--cell) * 0.86);
+  height: calc(var(--cell) * 0.86);
+  border-radius: 50%;
+  animation: stone-drop 0.24s cubic-bezier(0.2, 0.9, 0.25, 1.2) both;
+}
+
+.go-stone.black {
+  background: radial-gradient(circle at 34% 28%, #585349, #14130f 62%, #000);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35), inset 0 1px 2px rgba(255, 255, 255, 0.22);
+}
+
+.go-stone.white {
+  background: radial-gradient(circle at 34% 28%, #fff, #efece2 58%, #cfc9ba);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.22), inset 0 1px 2px #fff;
+}
+
+.go-stone.last::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 1px solid var(--ink);
+}
+
+.go-stone.win {
+  box-shadow: 0 0 0 3px var(--accent), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes stone-drop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ---------------- 21 点牌桌 ---------------- */
+.bj {
+  display: grid;
+  gap: 12px;
+  width: min(760px, 94%);
+  padding: 16px 18px;
+  border: 1px solid var(--ink);
+  background: radial-gradient(120% 90% at 50% 0%, #fdfcf6, #f6f4ec 60%, #efece0);
+  box-shadow: var(--shadow);
+}
+
+.bj-seat {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 12px;
+  border: 1px solid var(--rule-strong);
+  background: rgba(255, 255, 255, 0.66);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+/* 正在行动的座位 */
+.bj-seat.active {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.bj-seat.own .bj-who b {
+  color: var(--ink);
+}
+
+.bj-status {
+  min-width: 52px;
+  padding: 2px 6px;
+  border: 1px solid var(--rule-strong);
+  color: var(--faint);
+  font: 400 9.5px/1.6 var(--mono);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.bj-status.bust {
+  border-color: var(--warn-line);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.bj-status.win {
+  border-color: var(--ink);
+  background: var(--accent);
+  color: var(--ink);
+}
+
+.bj-status.lose {
+  border-color: var(--rule-strong);
+  color: var(--muted);
+}
+
+.bj-status.draw {
+  border-color: var(--rule-strong);
+  background: var(--surface-2);
+}
+
+.bj-who span {
+  display: block;
+  font: 400 9px/1.5 var(--mono);
+  letter-spacing: 0.18em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+
+.bj-who b {
+  font-size: 14px;
+}
+
+.bj-who em {
+  margin-left: 5px;
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.bj-cards {
+  display: flex;
+  gap: 9px;
+  justify-content: center;
+  align-items: center;
+  min-height: 92px;
+}
+
+.bj .bj-seat:not(.dealer) .bj-card {
+  width: 62px;
+  height: 88px;
+}
+
+.bj .bj-seat:not(.dealer) .bj-pip {
+  font-size: 18px;
+}
+
+.bj .bj-seat:not(.dealer) .bj-corner {
+  font-size: 10.5px;
+}
+
+.bj-card {
+  position: relative;
+  width: 72px;
+  height: 102px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  box-shadow: 2px 2px 0 rgba(16, 15, 13, 0.1);
+  animation: bj-deal 0.36s cubic-bezier(0.2, 0.8, 0.25, 1) both;
+  color: var(--ink);
+  font-family: var(--mono);
+}
+
+.bj-card.red {
+  color: var(--red);
+}
+
+.bj-card.back {
+  background: repeating-linear-gradient(45deg, #100f0d 0 4px, #1d1c18 4px 8px);
+}
+
+.bj-card.back::after {
+  content: "T";
+  position: absolute;
+  inset: 14% 16%;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  color: var(--lime-deep);
+  font: 700 16px/1 var(--mono);
+}
+
+.bj-corner {
+  position: absolute;
+  top: 5px;
+  left: 6px;
+  font-size: 12px;
+  line-height: 1.05;
+  font-weight: 700;
+  text-align: center;
+}
+
+.bj-pip {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.bj-pip small {
+  font-size: 13px;
+}
+
+.bj-total {
+  min-width: 58px;
+  padding: 6px 10px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  text-align: center;
+  font: 700 15px/1.2 var(--mono);
+}
+
+.bj-pot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px dashed var(--rule-strong);
+  border-bottom: 1px dashed var(--rule-strong);
+  color: var(--muted);
+  font: 400 10.5px/1.5 var(--mono);
+}
+
+.bj-chips {
+  display: flex;
+  gap: 3px;
+}
+
+.bj-chips i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--ink);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--surface);
+}
+
+.bj-chips i.dark {
+  background: var(--ink);
+  box-shadow: inset 0 0 0 3px var(--accent);
+}
+
+.bj-note {
+  margin: 0;
+  color: var(--faint);
+  font: 400 10.5px/1.6 var(--mono);
+  text-align: center;
+}
+
+.bj-result {
+  margin: 0;
+  padding: 6px 0;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.bj-result.lose {
+  color: var(--red);
+}
+
+.bj-result.win {
+  color: var(--ok);
+}
+
+.bj-result .dim {
+  margin-left: 8px;
+  font: 400 10.5px/1.5 var(--mono);
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.bj-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.bj-actions .btn {
+  padding: 5px 16px;
+}
+
+.arena-starts {
+  display: flex;
+  gap: 8px;
+}
+
+@keyframes bj-deal {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) rotateY(90deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotateY(0);
+  }
+}
+
+.game-board-lg {
+  width: min(60vh, 540px);
+}
+
+/* 剧场模式棋盘再大一号 */
+.app[data-layout="theater"] .game-board-lg {
+  width: min(66vh, 640px);
+}
+
+.app[data-layout="theater"] .gomoku {
+  --cell: clamp(24px, 5.4vh, 52px);
+}
+
+.app[data-layout="game"] .chead {
+  padding: 10px 16px;
+}
+
+.app[data-layout="game"] .chead h1 {
+  font-size: 15px;
+}
+
+.app[data-layout="game"] .composer {
+  padding: 10px 16px 12px;
+}
+
+.arena {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--ink);
+  background: radial-gradient(120% 80% at 50% 0%, #fbfbf6 0%, var(--surface) 46%, #f7f7f1 100%);
+}
+
+.arena-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--ink);
+  background: var(--surface);
+}
+
+.arena-top .gname {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.arena-top .gsub {
+  font: 400 10px/1.4 var(--mono);
+  color: var(--faint);
+  letter-spacing: 0.05em;
+}
+
+.arena-top .vs {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.side-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  font-size: 11.5px;
+}
+
+.side-tag b {
+  font-size: 12px;
+}
+
+.side-tag .dot {
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+}
+
+.side-tag.turn {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--lime-soft);
+}
+
+.side-tag.turn .dot {
+  background: var(--accent);
+  animation: blink 1.2s steps(2, end) infinite;
+}
+
+.vs-x {
+  font: 400 10px/1 var(--mono);
+  color: var(--faint);
+  letter-spacing: 0.1em;
+}
+
+.arena-tools {
+  display: flex;
+  gap: 6px;
+  padding-left: 12px;
+  border-left: 1px solid var(--rule-strong);
+}
+
+.arena-tools .btn {
+  padding: 3px 10px;
+  font-size: 10.5px;
+}
+
+.arena-invite {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 22px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--ink);
+  background: var(--accent-tint);
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.arena-invite .btn {
+  padding: 3px 14px;
+  font-size: 11px;
+}
+
+.arena-invite .btn:first-of-type {
+  margin-left: auto;
+}
+
+.arena-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.arena-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.arena-empty .dim {
+  color: var(--faint);
+  font: 400 10.5px/1.5 var(--mono);
+}
+
+.arena-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 22px 12px;
+  border-top: 1px solid var(--ink);
+  background: var(--surface);
+}
+
+.arena-turn {
+  font: 400 11px/1.6 var(--mono);
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.arena-turn.mine {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.arena-status .dim {
+  font: 400 10px/1.6 var(--mono);
+  color: var(--faint);
+}
+
+.arena-status .rematch {
+  flex: 0 1 auto;
+  margin-top: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--ink);
+}
+
+.arena-status .rematch-state {
+  font-size: 10.5px;
+}
+
+.arena-status .rematch-actions .btn {
+  flex: 0 0 auto;
+  padding: 4px 14px;
+}
+
+.arena-status .rematch-bar {
+  max-width: 200px;
+}
+
+/* 大厅里的大棋盘 */
+.game-board-lg {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: min(60vh, 540px);
+  aspect-ratio: 1;
+  padding: 14px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.game-board-lg .game-cell {
+  font-size: 20px;
+  color: var(--faint);
+  border: 1px solid var(--rule-strong);
+}
+
+.game-board-lg .game-cell.x,
+.game-board-lg .game-cell.o {
+  font-size: 44px;
+  color: var(--ink);
+}
+
+.game-board-lg .game-cell:not(:disabled):hover {
+  background: var(--accent-tint);
+  border-color: var(--ink);
+}
+
 /* ------------------------------------------------------------ 右栏 */
 .panel {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  overflow-y: auto;
-  padding: 0 16px 22px;
+  min-height: 0;
   border-left: 1px solid var(--ink);
   background: var(--surface);
+}
+
+/* 顶部标签页：直角、细墨线分隔，选中项用荧光青柠压住 */
+.panel-tabs {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  flex: none;
+  border-bottom: 1px solid var(--ink);
+  background: var(--surface);
+}
+
+.panel-tab {
+  position: relative;
+  padding: 9px 4px 8px;
+  border: 0;
+  border-right: 1px solid var(--rule);
+  background: transparent;
+  color: var(--muted);
+  font: 400 10.5px/1.4 var(--mono);
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.panel-tab:last-child {
+  border-right: 0;
+}
+
+.panel-tab:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.panel-tab.on {
+  background: var(--accent);
+  color: var(--ink);
+}
+
+.panel-tab.on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--ink);
+}
+
+.tab-count {
+  margin-left: 4px;
+  font-style: normal;
+  font-size: 9px;
+  color: var(--faint);
+}
+
+.panel-tab.on .tab-count {
+  color: var(--ink);
+}
+
+/* 游戏页的角标：有人邀请 / 轮到我 / 进行中几盘 */
+.tab-badge {
+  margin-left: 4px;
+  padding: 0 3px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--surface);
+  font-style: normal;
+  font-size: 8.5px;
+  letter-spacing: 0;
+}
+
+.panel-tab.on .tab-badge {
+  background: var(--ink);
+  color: var(--accent);
+}
+
+.panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 16px 22px;
   scrollbar-width: thin;
 }
 
@@ -1815,6 +2580,171 @@ textarea {
 }
 .game-state.done {
   color: var(--warn);
+}
+
+/* 邀请卡片：被邀请人侧栏顶部 */
+.game-invite {
+  margin: 0 0 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--ink);
+  background: var(--accent-tint);
+}
+
+.game-invite p {
+  margin: 0 0 7px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.game-invite-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.game-invite-btns .btn {
+  flex: 1;
+  padding: 3px 8px;
+  text-align: center;
+}
+
+/* 标题里的 "A vs B · N 人观战" */
+.game-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: var(--mono);
+}
+
+.game-title em {
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--faint);
+  text-transform: none;
+}
+
+/* 观战：只读标记 + 灰一点的棋盘 */
+.game-spectate {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--rule-strong);
+  color: var(--faint);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.game-board .game-cell.spectate {
+  cursor: default;
+}
+
+.game-board .game-cell.spectate:hover {
+  background: var(--surface);
+}
+
+.game-board .game-cell.spectate:not(:disabled) {
+  border-color: var(--ink);
+}
+
+/* 多盘同时进行时的切换列表 */
+.game-list {
+  margin-top: 9px;
+  padding-top: 7px;
+  border-top: 1px solid var(--rule);
+}
+
+.game-list-title {
+  margin: 0 0 5px;
+  color: var(--faint);
+  font: 400 9.5px/1.5 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.game-list-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: 400 10.5px/1.6 var(--mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.game-list-item:hover {
+  border-color: var(--rule);
+  background: var(--surface-2);
+}
+
+.game-list-item.on {
+  border-color: var(--ink);
+  background: var(--accent-tint);
+  color: var(--ink);
+}
+
+.game-list-item em {
+  font-style: normal;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+/* 结束后的操作区：再来一局 / 退出 */
+.rematch {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+}
+
+.rematch-state {
+  display: grid;
+  gap: 5px;
+  font: 400 10.5px/1.6 var(--mono);
+  color: var(--muted);
+}
+
+.rematch-state b {
+  color: var(--ink);
+}
+
+.rematch-state .ok {
+  color: var(--ok);
+}
+
+.rematch-state .dim {
+  color: var(--faint);
+}
+
+.rematch-bar {
+  display: block;
+  height: 3px;
+  border: 1px solid var(--ink);
+  background: var(--surface2);
+}
+
+.rematch-bar i {
+  display: block;
+  height: 100%;
+  background: var(--lime);
+  transition: width 0.4s linear;
+}
+
+.rematch-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.rematch-actions .btn {
+  flex: 1;
+  padding: 5px 8px;
+  text-align: center;
+  font-size: 11px;
 }
 
 .game-score {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useChat } from './use-chat';
 import { threadOf } from './store';
 import { AGENT, MAIN, threadUser } from './types';
@@ -9,6 +9,8 @@ import { SidePanel } from './components/SidePanel';
 import { AuthGate } from './components/AuthGate';
 import { Prompt } from './components/Prompt';
 import { HelpDialog } from './components/HelpDialog';
+import { Arena } from './components/Arena';
+import { involvesMe } from './components/GameBoard';
 
 export default function App() {
   const chat = useChat();
@@ -19,16 +21,37 @@ export default function App() {
   const target =
     state.active === AGENT ? 'Agent' : isPM ? `@${threadUser(state.active)}` : 'main';
 
+  const layout = state.layout;
+  const allGames = Object.values(state.games);
+  const mineGame = allGames.find((g) => involvesMe(g, state.me)) ?? null;
+  const focusedGame = state.gameFocus ? state.games[state.gameFocus] ?? null : null;
+  const arenaGame = mineGame ?? focusedGame;
+
+  // Esc：从专注/剧场回到聊天（对局不中断）
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (state.auth.open || state.help || dialog) return;
+      if (layout !== 'chat') chat.setLayout('chat');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [layout, state.auth.open, state.help, dialog, chat]);
+
   const search = (keyword: string) => {
     setDialog(null);
     chat.askAgent(`用 search_chat_history 检索关键词“${keyword}”，把命中的原文贴出来`, 'private');
   };
 
   return (
-    <div className="app">
+    <div className="app" data-layout={layout}>
       <Sidebar
         state={state}
-        openThread={chat.openThread}
+        collapsed={layout !== 'chat'}
+        openThread={(thread) => {
+          chat.openThread(thread);
+          if (layout !== 'chat' && !arenaGame) chat.setLayout('chat');
+        }}
         openAuth={chat.openAuth}
         onReconnect={chat.reconnect}
       />
@@ -66,6 +89,25 @@ export default function App() {
         />
       </main>
 
+      {layout !== 'chat' && (
+        <Arena
+          game={arenaGame}
+          me={state.me}
+          invite={state.gameInvite}
+          onMove={chat.gameMove}
+          onRematch={chat.gameRematch}
+          onHit={chat.gameHit}
+          onStand={chat.gameStand}
+          onStartKind={chat.gameStartKind}
+          onQuit={chat.gameQuit}
+
+          onAccept={chat.gameAccept}
+          onDecline={chat.gameDecline}
+          onClose={() => chat.setLayout('chat')}
+          onTheater={() => chat.setLayout(layout === 'theater' ? 'game' : 'theater')}
+        />
+      )}
+
       <SidePanel
         state={state}
         askAgent={chat.askAgent}
@@ -75,6 +117,13 @@ export default function App() {
         onGameMove={chat.gameMove}
         onGameStart={chat.gameStart}
         onGameQuit={chat.gameQuit}
+        onGameInvite={chat.gameInvite}
+        onGameAccept={chat.gameAccept}
+        onGameDecline={chat.gameDecline}
+        onGameFocus={chat.gameFocus}
+        onGameRematch={chat.gameRematch}
+        onEnterArena={() => chat.setLayout('game')}
+        onStartKind={chat.gameStartKind}
       />
 
       {state.auth.open && (

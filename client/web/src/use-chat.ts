@@ -19,6 +19,15 @@ export interface Chat {
   gameMove: (cell: number) => void;
   gameStart: () => void;
   gameQuit: () => void;
+  gameInvite: (target: string) => void;
+  gameAccept: () => void;
+  gameDecline: () => void;
+  gameFocus: (id: string) => void;
+  gameRematch: () => void;
+  gameHit: () => void;
+  gameStand: () => void;
+  gameStartKind: (kind: 'ttt' | 'gomoku' | 'bj') => void;
+  setLayout: (mode: 'chat' | 'game' | 'theater') => void;
   setIncludePrivate: (value: boolean) => void;
   setHelp: (open: boolean) => void;
   recall: (id: number) => void;
@@ -302,6 +311,59 @@ export function useChat(): Chat {
     send({ type: 'game', text: 'quit' });
   }, [send]);
 
+  const gameInvite = useCallback(
+    (target: string) => {
+      if (!send({ type: 'game', text: `invite ${target}` })) {
+        dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，邀请没有发出去' });
+      }
+    },
+    [send],
+  );
+
+  const gameAccept = useCallback(() => {
+    dispatch({ type: 'game-invite-clear' });
+    send({ type: 'game', text: 'accept' });
+  }, [send]);
+
+  const gameDecline = useCallback(() => {
+    dispatch({ type: 'game-invite-clear' });
+    send({ type: 'game', text: 'decline' });
+  }, [send]);
+
+  const setLayout = useCallback(
+    (mode: 'chat' | 'game' | 'theater') => dispatch({ type: 'layout', mode }),
+    [],
+  );
+
+  const gameHit = useCallback(() => {
+    send({ type: 'game', text: 'hit' });
+  }, [send]);
+
+  const gameStand = useCallback(() => {
+    send({ type: 'game', text: 'stand' });
+  }, [send]);
+
+  const gameStartKind = useCallback(
+    (kind: 'ttt' | 'gomoku' | 'bj') => {
+      const arg = kind === 'ttt' ? '' : ` ${kind}`;
+      if (!send({ type: 'game', text: `start${arg}` })) {
+        dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，开局指令没有发出去' });
+      }
+    },
+    [send],
+  );
+
+  const gameRematch = useCallback(() => {
+    if (!send({ type: 'game', text: 'rematch' })) {
+      dispatch({ type: 'local', kind: 'error', text: '本地桥未连接，再来一局的请求没有发出去' });
+    }
+  }, [send]);
+
+  const gameFocus = useCallback(
+    (id: string) => dispatch({ type: 'game-focus', id }),
+    [],
+  );
+
   const setIncludePrivate = useCallback(
     (value: boolean) => dispatch({ type: 'include-private', value }),
     [],
@@ -345,6 +407,26 @@ export function useChat(): Chat {
     }, 1200);
     return () => window.clearTimeout(timer);
   }, [state.me, state.active, state.threads, send]);
+
+  // 布局：有我的对局或收到邀请就进"专注游戏"，棋局关掉后回聊天
+  // 座位数变化（有人上桌/离桌）也要重算，不能只看 id
+  const gamesKey = Object.entries(state.games)
+    .map(([id, g]) => `${id}:${g.over ? 'o' : 'r'}:${g.bj?.seats.length ?? 0}`)
+    .join(',');
+  useEffect(() => {
+    const me = latest.current.me;
+    const games = Object.values(latest.current.games);
+    const mine = games.find((g) =>
+      g.kind === 'bj'
+        ? Boolean(g.bj?.seats.some((s) => s.user === me))
+        : g.players.X === me || g.players.O === me,
+    );
+    const invite = latest.current.gameInvite;
+    const layout = latest.current.layout;
+    if ((mine || invite) && layout === 'chat') dispatch({ type: 'layout', mode: 'game' });
+    // 只有"一张牌桌都没有"时才自动回聊天；有人在你接受邀请的瞬间还没上桌，不能把你踢出去
+    if (!games.length && !invite && layout === 'game') dispatch({ type: 'layout', mode: 'chat' });
+  }, [gamesKey, state.gameInvite, state.link]);
 
   // 延迟监测：每 5 秒 ping 一次，15 秒没有 pong 就当超时
   useEffect(() => {
@@ -395,6 +477,15 @@ export function useChat(): Chat {
     gameMove,
     gameStart,
     gameQuit,
+    gameInvite,
+    gameAccept,
+    gameDecline,
+    gameFocus,
+    gameRematch,
+    gameHit,
+    gameStand,
+    gameStartKind,
+    setLayout,
     setIncludePrivate,
     setHelp,
     recall,

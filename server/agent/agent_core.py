@@ -16,6 +16,19 @@ MAX_TOOL_RESULT_CHARS = 4000
 # 回传给界面展示的工具结果预览长度
 MAX_PREVIEW_CHARS = 180
 
+# 游戏场景（落子这类"每步都要等"的调用）走快路径：
+# 不要思考链、少给 token、短超时，让它像本地 AI 一样回得快。
+FAST_TIMEOUT = 12
+FAST_MAX_TOKENS = 320
+FAST_MAX_STEPS = 2
+
+# 不同服务商"关思考"的参数不一样，能塞的都塞上；被拒时自动退回普通请求
+FAST_BODY = {
+    "enable_thinking": False,                             # Qwen / DashScope
+    "chat_template_kwargs": {"enable_thinking": False},   # vLLM 上的 Qwen3
+    "thinking": {"type": "disabled"},                     # Anthropic 兼容网关
+}
+
 SYSTEM_PROMPT = """你是聊天室内置的 AI 助手 Agent。
 工作方式：
 1. 优先判断是否需要调用工具；需要时严格使用已注册工具的函数名和参数格式，不要编造工具。
@@ -28,6 +41,29 @@ SYSTEM_PROMPT = """你是聊天室内置的 AI 助手 Agent。
 6. 需要“现在几点”“今天是几号”“某条消息是多久以前”这类信息时，调用 get_current_time，不要凭上下文推断。
 回答要求：使用简体中文，简洁清晰，必要时用短列表，不要输出冗长铺垫。
 """
+
+
+def _chat_create(messages, spec, timeout: int, fast: bool):
+    """发一次模型请求。
+
+    fast=True 时尽量关掉"思考"：
+      - reasoning_effort="low"（OpenAI o 系 / 部分兼容网关）
+      - extra_body 里塞 enable_thinking / thinking（Qwen、vLLM、Anthropic 网关）
+    服务商不认这些参数会直接 400，调用方会退回一次普通请求。
+    """
+    kwargs = dict(
+        model=LLM_MODEL_ID,
+        messages=messages,
+        tools=spec,
+        tool_choice="auto",
+        temperature=0,
+        timeout=timeout,
+    )
+    if fast:
+        kwargs["reasoning_effort"] = "low"
+        kwargs["max_tokens"] = FAST_MAX_TOKENS
+        kwargs["extra_body"] = dict(FAST_BODY)
+    return get_client().chat.completions.create(**kwargs)
 
 
 class AgentUnavailable(RuntimeError):
@@ -111,6 +147,7 @@ def run_detailed(
     history: Optional[List[dict]] = None,
     agent_room_id: Optional[int] = None,
     extra_tools: Optional[Tuple[List[dict], Dict[str, Callable]]] = None,
+    fast: bool = False,
 ) -> Tuple[str, List[dict]]:
     """跑一轮 Agent，返回（最终回复, 工具调用记录）。工具记录用于界面展示「真实调用」。
 
@@ -119,6 +156,8 @@ def run_detailed(
     """
     if not user_input or not user_input.strip():
         return "消息为空，无法处理", []
+    if fast:
+        max_steps = min(max_steps, FAST_MAX_STEPS)
 
     if room_id is not None:
         spec, tools_map = build_room_tools(room_id, user_id, agent_room_id)
@@ -145,20 +184,24 @@ def run_detailed(
 
     steps: List[dict] = []
     for step in range(max_steps):
+        started = time.perf_counter()
         try:
-            resp = get_client().chat.completions.create(
-                model=LLM_MODEL_ID,
-                messages=messages,
-                tools=spec,
-                tool_choice="auto",
-                temperature=0,
-                timeout=30,
-            )
+            resp = _chat_create(messages, spec, FAST_TIMEOUT if fast else 30, fast)
         except AgentUnavailable as e:
             return f"Agent 暂不可用：{e}。聊天室的收发不受影响。", steps
-        except Exception as e:
-            print(f"[Agent] 模型调用失败(step={step}): {e}")
-            return f"模型调用失败：{e}", steps
+        except Exception as first_error:
+            if not fast:
+                print(f"[Agent] 模型调用失败(step={step}): {first_error}")
+                return f"模型调用失败：{first_error}", steps
+            # 服务商不认“关思考”的参数：退回一次普通请求，别让落子卡死
+            print(f"[Agent] 快路径参数被拒，退回普通请求: {first_error}")
+            try:
+                resp = _chat_create(messages, spec, 30, False)
+            except Exception as e:
+                print(f"[Agent] 模型调用失败(step={step}): {e}")
+                return f"模型调用失败：{e}", steps
+        if fast:
+            print(f"[Agent] 快路径 {int((time.perf_counter() - started) * 1000)}ms")
 
         msg = resp.choices[0].message
 

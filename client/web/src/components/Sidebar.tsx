@@ -12,11 +12,14 @@ const LINK_TEXT: Record<State['link'], string> = {
 
 export function Sidebar({
   state,
+  collapsed,
   openThread,
   openAuth,
   onReconnect,
 }: {
   state: State;
+  /** 专注游戏/剧场模式：只留一条图标栏 */
+  collapsed: boolean;
   openThread: (thread: string) => void;
   openAuth: (open: boolean) => void;
   onReconnect: () => void;
@@ -30,7 +33,7 @@ export function Sidebar({
   const pmUsers = pmUsersOf(state);
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
       <div className="brand">
         <div className="mark">T</div>
         <div className="name">TACO</div>

@@ -60,6 +60,23 @@ export interface ServerMsg {
   over?: boolean;
   result?: string;
   score?: { win: number; lose: number; draw: number };
+  /** game 消息：对局 id（字符串，和消息的 id 不是一回事）、玩家、观战数、双方战绩 */
+  game_id?: string;
+  players?: { X: string; O: string };
+  vs_agent?: boolean;
+  winner?: 'X' | 'O' | null;
+  legal?: number[];
+  spectators?: number;
+  scores?: Record<string, { win: number; lose: number; draw: number }>;
+  rematch?: { votes: string[]; deadline: number; window: number };
+  kind?: 'ttt' | 'gomoku' | 'bj';
+  size?: number;
+  win_len?: number;
+  win_cells?: number[];
+  last_move?: number | null;
+  bj?: BjView;
+  from?: string;
+  ttl?: number;
 }
 
 export interface HistoryItem {
@@ -79,12 +96,75 @@ export interface TodoItem {
 }
 
 /** 井字棋面板状态（只发给下棋的本人） */
+export interface BjCard {
+  rank: string;
+  suit: string;
+}
+
+export interface BjSeat {
+  user: string;
+  /** 这个座位拿了几张牌（所有人都能看到张数） */
+  count: number;
+  status: 'playing' | 'stand' | 'bust';
+  result: '' | 'win' | 'lose' | 'draw';
+  /** 只有本座位的连接能拿到自己的牌面与点数 */
+  hand: BjCard[] | null;
+  score: number | null;
+  bet: number;
+}
+
+export interface BjView {
+  seats: BjSeat[];
+  /** 我在哪一个座位（观战者是 null） */
+  me: string | null;
+  /** 轮到谁决策 */
+  current: string | null;
+  /** 旧的单人字段，保留兼容 */
+  player: BjCard[];
+  player_count: number;
+  player_score: number | null;
+  /** 庄家：未揭示时第二张是 null */
+  dealer: (BjCard | null)[];
+  dealer_score: number;
+  revealed: boolean;
+  bet: number;
+  deck_left: number;
+  round: number;
+}
+
 export interface GameState {
-  board: string[];               // 9 格：" " / "X" / "O"
+  /** ttt / gomoku / bj */
+  kind: 'ttt' | 'gomoku' | 'bj';
+  /** 对局 id：一人一局，观战靠它区分 */
+  id: string;
+  players: { X: string; O: string };
+  /** 对手是不是 Agent（决定了提示文案和是否需要等模型） */
+  vs_agent: boolean;
+  /** 棋盘（井字棋 9 格 / 五子棋 225 格）；21 点没有棋盘 */
+  board: string[];
+  size?: number;
+  win_len?: number;
+  win_cells?: number[];
+  last_move?: number | null;
+  /** 21 点专用视图（按人裁剪） */
+  bj?: BjView;
   turn: 'X' | 'O';
   over: boolean;
   result: '' | 'win' | 'lose' | 'draw';
-  score: { win: number; lose: number; draw: number };
+  winner: 'X' | 'O' | null;
+  legal: number[];
+  spectators: number;
+  scores: Record<string, { win: number; lose: number; draw: number }>;
+  /** 结束后的"再来一局"投票：双方都在窗口内确认才开新局 */
+  rematch: { votes: string[]; deadline: number; window: number };
+}
+
+export interface GameInvite {
+  from: string;
+  at: number;
+  ttl: number;
+  /** ttt / gomoku / bj */
+  kind?: string;
 }
 
 export type SendMsg =
